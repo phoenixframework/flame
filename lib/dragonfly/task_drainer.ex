@@ -1,4 +1,5 @@
 defmodule Dragonfly.TaskTerminator do
+  @moduledoc false
   use GenServer
 
   alias Dragonfly.TaskTerminator

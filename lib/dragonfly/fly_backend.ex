@@ -106,22 +106,33 @@ defmodule Dragonfly.FlyBackend do
     System.stop()
   end
 
+  defp with_elapsed_ms(func) when is_function(func, 0) do
+    {micro, result} = :timer.tc(func)
+    {result, div(micro, 1000)}
+  end
+
   @impl true
   def remote_boot(%FlyBackend{parent_ref: parent_ref} = state) do
-    req =
-      Req.post!("#{state.host}/v1/apps/#{state.app}/machines",
-        auth: {:bearer, state.token},
-        json: %{
-          name: "#{state.app}-dragonfly-#{rand_id(20)}",
-          config: %{
-            image: state.image,
-            size: state.size,
-            auto_destroy: true,
-            restart: %{policy: "no"},
-            env: state.env
+    {req, req_connect_time} =
+      with_elapsed_ms(fn ->
+        Req.post!("#{state.host}/v1/apps/#{state.app}/machines",
+          connect_options: [timeout: state.connect_timeout],
+          retry: false,
+          auth: {:bearer, state.token},
+          json: %{
+            name: "#{state.app}-dragonfly-#{rand_id(20)}",
+            config: %{
+              image: state.image,
+              size: state.size,
+              auto_destroy: true,
+              restart: %{policy: "no"},
+              env: state.env
+            }
           }
-        }
-      )
+        )
+      end)
+
+    remaining_connect_window = state.connect_timeout - req_connect_time
 
     case req.body do
       %{"id" => id, "instance_id" => instance_id, "private_ip" => ip} ->
@@ -139,7 +150,7 @@ defmodule Dragonfly.FlyBackend do
             {^parent_ref, :up, machine_pid} ->
               machine_pid
           after
-            state.connect_timeout ->
+            remaining_connect_window ->
               Logger.error("failed to connect to fly machine within #{state.connect_timeout}ms")
               exit(:timeout)
           end

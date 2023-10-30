@@ -32,14 +32,19 @@ defmodule Dragonfly.Backend.ParentMonitor do
     failsafe_timer = Process.send_after(self(), :failsafe_stop, failsafe_timeout)
 
     {:ok,
-     connect(%{
+     %{
        parent_pid: parent_pid,
        parent_ref: parent_ref,
        parent_monitor_ref: nil,
        connect_timer: nil,
        connect_attempts: 0,
        failsafe_timer: failsafe_timer
-     })}
+     }, {:continue, :connect}}
+  end
+
+  @impl true
+  def handle_continue(:connect, state) do
+    {:noreply, connect(state)}
   end
 
   def connect(state) do
@@ -87,7 +92,7 @@ defmodule Dragonfly.Backend.ParentMonitor do
   end
 
   def handle_info({:nodeup, who}, state) do
-    if who === node(state.parent_pid) do
+    if !state.parent_monitor_ref && who === node(state.parent_pid) do
       {:noreply, connect(state)}
     else
       {:noreply, state}

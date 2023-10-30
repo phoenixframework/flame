@@ -1,4 +1,5 @@
 defmodule Dragonfly.LocalBackend do
+  @moduledoc false
   @behaviour Dragonfly.Backend
 
   @impl true
