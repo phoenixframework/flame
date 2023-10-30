@@ -275,6 +275,9 @@ defmodule Dragonfly.Runner do
 
     result =
       runner.backend.remote_spawn_link(state.backend_state, fn ->
+        # This runs on the remote node. Supervise the task so we can monitor it,
+        # deadline it, and handle graceful shutdowns when the whole system goes
+        # down
         try do
           task = Task.Supervisor.async_nolink(runner.task_sup, func)
 
