@@ -64,7 +64,7 @@ defmodule Dragonfly.Runner do
       :ok
   """
   def remote_boot(pid, timeout \\ nil) when is_pid(pid) do
-    GenServer.call(pid, {:remote_boot, timeout})
+    GenServer.call(pid, {:remote_boot, timeout}, timeout || :infinity)
   end
 
   @doc """
@@ -120,35 +120,63 @@ defmodule Dragonfly.Runner do
   end
 
   def handle_info({:remote_fail, ref, reason}, state) do
+    debug(state, "remote_fail: #{inspect(reason)}")
     %{^ref => from} = state.waiting
     GenServer.reply(from, {ref, :fail, reason})
     {:noreply, drop_waiting(state, ref)}
   end
 
-  def handle_info({:DOWN, _monitor_ref, :process, pid, reason}, state) do
+  def handle_info({:DOWN, _monitor_ref, :process, pid, reason} = msg, state) do
     %Runner{} = runner = state.runner
-    %{^pid => ref} = state.spawns
-    # if we still have waiting, something went wrong, tell caller and cleanup
-    case state.waiting do
-      %{^ref => _} -> maybe_reply_waiting(state, ref, {ref, :fail, {:exit, reason}})
-      %{} -> :noop
-    end
 
-    new_state =
-      state
-      |> drop_waiting(ref)
-      |> drop_spawn(pid)
-
-    if runner.single_use do
-      stop_reason =
-        case reason do
-          :normal -> :normal
-          other -> {:shutdown, other}
+    case state.spawns do
+      %{^pid => ref} ->
+        # if we still have waiting, something went wrong, tell caller and cleanup
+        case state.waiting do
+          %{^ref => _} -> maybe_reply_waiting(state, ref, {ref, :fail, {:exit, reason}})
+          %{} -> :noop
         end
 
-      {:stop, stop_reason, new_state}
+        new_state =
+          state
+          |> drop_waiting(ref)
+          |> drop_spawn(pid)
+
+        if runner.single_use do
+          stop_reason =
+            case reason do
+              :normal -> :normal
+              other -> {:shutdown, other}
+            end
+
+          {:stop, stop_reason, new_state}
+        else
+          {:noreply, new_state}
+        end
+
+      %{} ->
+        {:noreply, maybe_backend_handle_info(state, msg)}
+    end
+  end
+
+  def handle_info(msg, state) do
+    {:noreply, maybe_backend_handle_info(state, msg)}
+  end
+
+  defp maybe_backend_handle_info(state, msg) do
+    %Runner{backend: backend} = state.runner
+
+    if function_exported?(backend, :handle_info, 2) do
+      case backend.handle_info(msg, state.backend_state) do
+        {:noreply, new_backend_state} ->
+          %{state | backend_state: new_backend_state}
+
+        other ->
+          raise ArgumentError,
+                "expected #{inspect(backend)}.handle_info/2 to return {:noreply, state}, got: #{inspect(other)}"
+      end
     else
-      {:noreply, new_state}
+      state
     end
   end
 
@@ -169,10 +197,11 @@ defmodule Dragonfly.Runner do
     ref = make_ref()
     parent = self()
 
-    result = runner.backend.remote_spawn_link(state.backend_state, fn ->
-      send(parent, {ref, :ok})
-      runner.backend.system_shutdown()
-    end)
+    result =
+      runner.backend.remote_spawn_link(state.backend_state, fn ->
+        send(parent, {ref, :ok})
+        runner.backend.system_shutdown()
+      end)
 
     case result do
       {:ok, _spawn_pid, _backend_state} ->
@@ -196,7 +225,7 @@ defmodule Dragonfly.Runner do
      |> remote_async_call(ref, caller_parent, func, timeout)}
   end
 
-  def handle_call({:remote_boot, timeout}, _from, state) do
+  def handle_call({:remote_boot, _timeout}, _from, state) do
     %{runner: runner, backend_state: backend_state} = state
 
     case runner.status do
@@ -204,26 +233,20 @@ defmodule Dragonfly.Runner do
         {:reply, {:error, :already_booted}, state}
 
       :awaiting_boot ->
-        within_time!(
-          timeout || runner.connect_timeout,
-          "unable to reach runner #{runner.node_name} after #{runner.connect_timeout}ms",
-          fn ->
-            time(runner, "runner connect", fn ->
-              case runner.backend.remote_boot(backend_state) do
-                {:ok, new_backend_state} ->
-                  new_runner = %Runner{runner | status: :booted}
-                  {:reply, :ok, %{state | runner: new_runner, backend_state: new_backend_state}}
+        time(runner, "runner connect", fn ->
+          case runner.backend.remote_boot(backend_state) do
+            {:ok, new_backend_state} ->
+              new_runner = %Runner{runner | status: :booted}
+              {:reply, :ok, %{state | runner: new_runner, backend_state: new_backend_state}}
 
-                {:error, reason} ->
-                  {:stop, {:shutdown, reason}, state}
+            {:error, reason} ->
+              {:stop, {:shutdown, reason}, state}
 
-                other ->
-                  raise ArgumentError,
-                        "expected #{inspect(runner.backend)}.remote_boot/1 to return {:ok, new_state} | {:error, reason}, got: #{inspect(other)}"
-              end
-            end)
+            other ->
+              raise ArgumentError,
+                    "expected #{inspect(runner.backend)}.remote_boot/1 to return {:ok, new_state} | {:error, reason}, got: #{inspect(other)}"
           end
-        )
+        end)
     end
   end
 
@@ -253,13 +276,7 @@ defmodule Dragonfly.Runner do
     result =
       runner.backend.remote_spawn_link(state.backend_state, fn ->
         try do
-          Process.flag(:trap_exit, true)
-          # ensure app is fully started if parent connects before up
-          if otp_app = System.get_env("RELEASE_NAME") do
-            Application.ensure_all_started(:"#{otp_app}")
-          end
-
-          task = Task.Supervisor.async(runner.task_sup, func)
+          task = Task.Supervisor.async_nolink(runner.task_sup, func)
 
           case Task.yield(task, timeout) || Task.shutdown(task) do
             {:ok, result} ->
@@ -268,13 +285,12 @@ defmodule Dragonfly.Runner do
               if caller_parent, do: send(caller_parent, {ref, :ok, result})
               send(parent, {:remote_ok, ref})
 
+            {:exit, reason} ->
+              send(parent, {:remote_fail, ref, {:exit, reason}})
+
             nil ->
               send(parent, {:remote_fail, ref, {:exit, :timeout}})
           end
-        catch
-          :throw, reason -> send(parent, {:remote_fail, ref, {:throw, reason}})
-          :exit, reason -> send(parent, {:remote_fail, ref, {:exit, reason}})
-          :error, reason -> send(parent, {:remote_fail, ref, {:error, {reason, __STACKTRACE__}}})
         after
           if runner.single_use, do: runner.backend.system_shutdown()
         end
@@ -294,19 +310,6 @@ defmodule Dragonfly.Runner do
     case state.waiting do
       %{^ref => nil} -> :noop
       %{^ref => from} -> GenServer.reply(from, reply)
-    end
-  end
-
-  defp within_time!(time, error_msg, func) do
-    task = Task.Supervisor.async(Dragonfly.TaskSupervisor, func)
-
-    case Task.yield(task, time) || Task.shutdown(task) do
-      {:ok, result} ->
-        result
-
-      nil ->
-        Logger.error(error_msg)
-        exit(:timeout)
     end
   end
 
@@ -345,7 +348,7 @@ defmodule Dragonfly.Runner do
       log: Keyword.get(opts, :log, :info),
       single_use: Keyword.get(opts, :single_use, false),
       timeout: opts[:timeout] || 20_000,
-      connect_timeout: opts[:connect_timeout] || 20_000,
+      connect_timeout: opts[:connect_timeout] || 30_000,
       shutdown_timeout: opts[:shutdown_timeout] || 5_000,
       task_sup: opts[:task_sup] || Dragonfly.TaskSupervisor
     }
@@ -358,7 +361,14 @@ defmodule Dragonfly.Runner do
     result
   end
 
-  defp time(%Runner{log: _} = _Runner, _label, func) do
+  defp time(%Runner{log: _} = _runner, _label, func) do
     func.()
+  end
+
+  defp debug(%{runner: %Runner{log: log}}, msg) do
+    case log do
+      :debug -> Logger.info(msg)
+      _ -> :noop
+    end
   end
 end

@@ -21,5 +21,9 @@ defmodule Dragonfly.Backend do
     impl().remote_boot(state)
   end
 
+  def handle_info(msg, state) do
+    impl().handle_info(msg, state)
+  end
+
   def impl, do: Application.get_env(:dragonfly, :backend, Dragonfly.LocalBackend)
 end

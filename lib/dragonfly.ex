@@ -12,26 +12,26 @@ defmodule Dragonfly do
   ## Examples
 
     def my_expensive_thing(arg) do
-      Dragonfly.call(fn ->
+      Dragonfly.call(, fn ->
         # i'm now doing expensive work inside a new node
         # pubsub and repo access all just work
         Phoenix.PubSub.broadcast(MyApp.PubSub, "topic", result)
 
-        # can return awaitable results back to caller's Task
+        # can return awaitable results back to caller
         result
       end)
   """
-  def async(func) when is_function(func, 0) do
-    async(func, [])
+  def call(func) when is_function(func, 0) do
+    call(func, [])
   end
 
-  def async(func, opts) when is_function(func, 0) and is_list(opts) do
+  def call(func, opts) when is_function(func, 0) and is_list(opts) do
     {:ok, pid} = Runner.start_link(opts)
     :ok = Runner.remote_boot(pid)
-    async(pid, func)
+    call(pid, func)
   end
 
-  def async(pid, func) when is_pid(pid) and is_function(func, 0) do
+  def call(pid, func) when is_pid(pid) and is_function(func, 0) do
     Runner.call(pid, func)
   end
 end

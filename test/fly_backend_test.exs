@@ -39,14 +39,15 @@ defmodule Dragonfly.FlyBackendTest do
     ]
 
     runner = Runner.new(backend: {FlyBackend, opts})
-    assert runner.backend_options.host == "foo.local"
-    assert runner.backend_options.size == "performance-1x"
+    assert {:ok, init} = runner.backend_init
+    assert init.host == "foo.local"
+    assert init.size == "performance-1x"
 
-    assert runner.backend_options.env == %{
+    assert %{
              one: 1,
-             DRAGONFLY_PARENT_NODE: "nonode@nohost",
+             DRAGONFLY_PARENT: _,
              PHX_SERVER: "false"
-           }
+           } = init.env
   end
 
   test "global configured backend" do
