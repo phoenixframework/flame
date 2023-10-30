@@ -1,7 +1,5 @@
 defmodule Dragonfly.Runner do
-  @moduledoc """
-  TODO
-  """
+  @moduledoc false
   use GenServer
   require Logger
 
@@ -368,10 +366,7 @@ defmodule Dragonfly.Runner do
     func.()
   end
 
-  defp debug(%{runner: %Runner{log: log}}, msg) do
-    case log do
-      :debug -> Logger.info(msg)
-      _ -> :noop
-    end
+  defp debug(%{runner: %Runner{log: level}}, msg) do
+    if level, do: Logger.log(level, msg)
   end
 end

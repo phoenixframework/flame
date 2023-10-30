@@ -6,8 +6,28 @@ defmodule Dragonfly do
 
   alias Dragonfly.Runner
 
+  def remote_boot(opts) do
+    {:ok, pid} = Runner.start_link(opts)
+    :ok = Runner.remote_boot(pid)
+    {:ok, pid}
+  end
+
   @doc """
-  Runs a task in an ephemeral Runner of the app.
+  Calls a function in a remote runner.
+
+  If no runner is provided, a new one is linked to the caller and
+  remotely booted.
+
+  ## Options
+
+    * `:single_use` - if `true`, the runner will be terminated after the call. Defaults `false`.
+    * `:backend` - The backend to use. Defaults to `Dragonfly.LocalBackend`.
+    * `:log` - The log level to use for verbose logging. Defaults to `false`.
+    * `:single_use` -
+    * `:timeout` -
+    * `:connect_timeout` -
+    * `:shutdown_timeout` -
+    * `:task_su` -
 
   ## Examples
 
@@ -20,6 +40,8 @@ defmodule Dragonfly do
         # can return awaitable results back to caller
         result
       end)
+
+  When the caller exits, the remote runner will be terminated.
   """
   def call(func) when is_function(func, 0) do
     call(func, [])
