@@ -43,8 +43,16 @@ defmodule Dragonfly do
 
   When the caller exits, the remote runner will be terminated.
   """
+  def call(pool, func, opts) when is_atom(pool) and is_function(func, 0) and is_list(opts) do
+    Dragonfly.Pool.call(pool, func, opts)
+  end
+
   def call(func) when is_function(func, 0) do
     call(func, [])
+  end
+
+  def call(pool, func) when is_atom(pool) and is_function(func, 0) do
+    Dragonfly.Pool.call(pool, func, [])
   end
 
   def call(func, opts) when is_function(func, 0) and is_list(opts) do
