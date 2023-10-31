@@ -8,9 +8,26 @@ defmodule Dragonfly.Runner.MixProject do
       elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      package: package(),
+      homepage_url: "http://www.phoenixframework.org",
+      description: """
+      Remote empheral application process runner.
+      """
     ]
   end
+
+  defp package do
+    [
+      maintainers: ["Chris McCord", "Jason Stiebs"],
+      licenses: ["MIT"],
+      links: %{
+        GitHub: "https://github.com/phoenixframework/dragonfly"
+      },
+      files: ~w(lib CHANGELOG.md LICENSE.md mix.exs README.md)
+    ]
+  end
+
 
   # Run "mix help compile.app" to learn about applications.
   def application do
