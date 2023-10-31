@@ -10,6 +10,7 @@ defmodule Dragonfly.Runner.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       package: package(),
+      source_url: "https://github.com/phoenixframework/dragonfly",
       homepage_url: "http://www.phoenixframework.org",
       description: """
       Remote empheral application process runner.
@@ -28,7 +29,6 @@ defmodule Dragonfly.Runner.MixProject do
     ]
   end
 
-
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
@@ -43,7 +43,7 @@ defmodule Dragonfly.Runner.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:req, "~> 0.4.4"},
+      {:req, "~> 0.4.5"},
       {:mox, "~> 1.1.0", only: :test},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
