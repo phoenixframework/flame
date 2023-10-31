@@ -151,9 +151,11 @@ defmodule Dragonfly.Pool do
   end
 
   defp min_runner(state) do
-    case Enum.min_by(state.runners, fn {_, %RunnerState{count: count}} -> count end) do
-      {_ref, min} -> min
-      nil -> nil
+    if map_size(state.runners) == 0 do
+      nil
+    else
+      {_ref, min} = Enum.min_by(state.runners, fn {_, %RunnerState{count: count}} -> count end)
+      min
     end
   end
 
