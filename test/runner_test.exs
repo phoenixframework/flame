@@ -184,4 +184,20 @@ defmodule Dragonfly.RunnerTest do
       assert Runner.call(runner, fn -> :works end) == :works
     end
   end
+
+  test "idle shutdown" do
+    timeout = 500
+    {:ok, runner} = mock_successful_runner(0, idle_shutdown_after: timeout)
+
+    Process.monitor(runner)
+    assert Runner.remote_boot(runner) == :ok
+
+    assert_receive {:DOWN, _ref, :process, ^runner, :normal}, timeout * 2
+
+    {:ok, runner} = mock_successful_runner(1, idle_shutdown_after: timeout)
+    Process.monitor(runner)
+    assert Runner.remote_boot(runner) == :ok
+    assert Runner.call(runner, fn -> :works end) == :works
+    assert_receive {:DOWN, _ref, :process, ^runner, :normal}, timeout * 2
+  end
 end

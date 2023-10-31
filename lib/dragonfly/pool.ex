@@ -29,12 +29,14 @@ defmodule Dragonfly.Pool do
   @default_timeout 20_000
   @default_max_concurrency 100
   @boot_timeout 20_000
+  @idle_shutdown_after 20_000
   @ok_async_call :ok_async_call
 
   defstruct name: nil,
             dynamic_sup: nil,
             task_sup: nil,
             boot_timeout: nil,
+            idle_shutdown_after: nil,
             min: nil,
             max: nil,
             max_concurrency: nil,
@@ -47,6 +49,22 @@ defmodule Dragonfly.Pool do
   TODO
   """
   def start_link(opts) do
+    Keyword.validate!(opts, [
+      :name,
+      :dynamic_sup,
+      :task_sup,
+      :idle_shutdown_after,
+      :min,
+      :max,
+      :max_concurrency,
+      :backend,
+      :log,
+      :single_use,
+      :timeout,
+      :connect_timeout,
+      :shutdown_timeout
+    ])
+
     GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
   end
 
@@ -68,7 +86,8 @@ defmodule Dragonfly.Pool do
       name: Keyword.fetch!(opts, :name),
       min: Keyword.fetch!(opts, :min),
       max: Keyword.fetch!(opts, :max),
-      boot_timeout: Keyword.get(opts, :boot_timeout, @boot_timeout),
+      boot_timeout: Keyword.get(opts, :connect_timeout, @boot_timeout),
+      idle_shutdown_after: Keyword.get(opts, :idle_shutdown_after, @idle_shutdown_after),
       max_concurrency: Keyword.get(opts, :max_concurrency, @default_max_concurrency),
       runner_opts:
         Keyword.take(
@@ -80,6 +99,7 @@ defmodule Dragonfly.Pool do
             :timeout,
             :connect_timeout,
             :shutdown_timeout,
+            :idle_shutdown_after,
             :task_sup
           ]
         )
@@ -184,8 +204,9 @@ defmodule Dragonfly.Pool do
 
   defp boot_runners(%Pool{} = state) do
     if state.min > 0 do
+      # start min runners, and do not idle them down regardless of idle configuration
       0..(state.min - 1)
-      |> Task.async_stream(fn _ -> start_child_runner(state) end,
+      |> Task.async_stream(fn _ -> start_child_runner(state, idle_shutdown_after: nil) end,
         max_concurrency: 10,
         timeout: state.boot_timeout
       )
@@ -198,8 +219,8 @@ defmodule Dragonfly.Pool do
     end
   end
 
-  defp start_child_runner(%Pool{} = state) do
-    opts = state.runner_opts
+  defp start_child_runner(%Pool{} = state, runner_opts \\ []) do
+    opts = Keyword.merge(state.runner_opts, runner_opts)
 
     name = Module.concat(state.name, "Runner#{map_size(state.runners) + 1}")
 
@@ -277,12 +298,15 @@ defmodule Dragonfly.Pool do
 
     state =
       case state.callers do
-        %{^ref => {from, runner_ref}} -> notify_caller(state, ref, runner_ref, from, {:exit, reason})
-        %{} -> state
+        %{^ref => {from, runner_ref}} ->
+          notify_caller(state, ref, runner_ref, from, {:exit, reason})
+
+        %{} ->
+          state
       end
 
     case state.runners do
-      %{^ref => _} -> drop_child_runner(ref, state)
+      %{^ref => _} -> drop_child_runner(state, ref)
       %{} -> state
     end
   end

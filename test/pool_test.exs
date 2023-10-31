@@ -1,5 +1,5 @@
 defmodule Dragonfly.PooTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Dragonfly.Pool
 
@@ -8,7 +8,7 @@ defmodule Dragonfly.PooTest do
     parent = self()
 
     task =
-      Task.async(fn ->
+      Task.start_link(fn ->
         Dragonfly.call(pool, fn ->
           send(parent, {ref, :called})
           Process.sleep(time)
@@ -20,12 +20,16 @@ defmodule Dragonfly.PooTest do
     end
   end
 
-  test "init boots min runners synchronously", config do
+  setup config do
+    runner_opts = Map.fetch!(config, :runner)
     dyn_sup = Module.concat(config.test, "DynamicSup")
+    pool_pid = start_supervised!({Pool.Supervisor, Keyword.merge(runner_opts, name: config.test)})
 
-    _pid =
-      start_supervised!({Pool.Supervisor, name: config.test, min: 1, max: 2, max_concurrency: 2})
+    {:ok, dyn_sup: dyn_sup, pool_pid: pool_pid}
+  end
 
+  @tag runner: [min: 1, max: 2, max_concurrency: 2]
+  test "init boots min runners synchronously", %{dyn_sup: dyn_sup} = config do
     min_pool = Supervisor.which_children(dyn_sup)
     assert [{:undefined, _pid, :worker, [Dragonfly.Runner]}] = min_pool
     # execute against single runner
@@ -51,5 +55,26 @@ defmodule Dragonfly.PooTest do
     assert_receive {:DOWN, ^ref, :process, _, {:timeout, _}}, 1000
     assert Dragonfly.call(config.test, fn -> :queued end) == :queued
     assert new_pool == Supervisor.which_children(dyn_sup)
+  end
+
+  @tag runner: [min: 1, max: 2, max_concurrency: 2, idle_shutdown_after: 500]
+  test "idle shutdown", %{dyn_sup: dyn_sup} = config do
+    sim_long_running(config.test, 100)
+    sim_long_running(config.test, 100)
+    sim_long_running(config.test, 100)
+
+    # we've scaled from min 1 to max 2 at this point
+    assert [
+             {:undefined, runner1, :worker, [Dragonfly.Runner]},
+             {:undefined, runner2, :worker, [Dragonfly.Runner]}
+           ] = Supervisor.which_children(dyn_sup)
+
+    Process.monitor(runner1)
+    Process.monitor(runner2)
+    assert_receive {:DOWN, _ref, :process, ^runner2, :normal}, 1000
+    refute_receive {:DOWN, _ref, :process, ^runner1, :normal}
+
+    assert [{:undefined, ^runner1, :worker, [Dragonfly.Runner]}] =
+             Supervisor.which_children(dyn_sup)
   end
 end

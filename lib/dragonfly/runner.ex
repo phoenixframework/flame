@@ -17,7 +17,8 @@ defmodule Dragonfly.Runner do
              :timeout,
              :status,
              :log,
-             :connect_timeout
+             :connect_timeout,
+             :idle_shutdown_after
            ]}
 
   defstruct id: nil,
@@ -32,7 +33,8 @@ defmodule Dragonfly.Runner do
             status: nil,
             log: :info,
             connect_timeout: 10_000,
-            shutdown_timeout: 5_000
+            shutdown_timeout: 5_000,
+            idle_shutdown_after: nil
 
   @doc """
   TODO
@@ -103,7 +105,15 @@ defmodule Dragonfly.Runner do
 
     case runner.backend_init do
       {:ok, backend_state} ->
-        {:ok, %{runner: runner, waiting: %{}, spawns: %{}, backend_state: backend_state}}
+        state = %{
+          runner: runner,
+          waiting: %{},
+          spawns: %{},
+          backend_state: backend_state,
+          idle_timer: nil
+        }
+
+        {:ok, state}
 
       {:error, reason} ->
         {:stop, reason}
@@ -111,6 +121,11 @@ defmodule Dragonfly.Runner do
   end
 
   @impl true
+  def handle_info(:idle_shutdown, state) do
+    # TODO – decide if we should break links here or not?
+    {:stop, :normal, state}
+  end
+
   def handle_info({:remote_ok, ref}, state) do
     %{^ref => from} = state.waiting
     GenServer.reply(from, {ref, :ok})
@@ -235,7 +250,8 @@ defmodule Dragonfly.Runner do
           case runner.backend.remote_boot(backend_state) do
             {:ok, new_backend_state} ->
               new_runner = %Runner{runner | status: :booted}
-              {:reply, :ok, %{state | runner: new_runner, backend_state: new_backend_state}}
+              new_state = %{state | runner: new_runner, backend_state: new_backend_state}
+              {:reply, :ok, schedule_idle_shutdown(new_state)}
 
             {:error, reason} ->
               {:stop, {:shutdown, reason}, state}
@@ -258,11 +274,11 @@ defmodule Dragonfly.Runner do
 
   defp monitor_remote_spawn(state, pid, ref) when is_pid(pid) do
     Process.monitor(pid)
-    %{state | spawns: Map.put(state.spawns, pid, ref)}
+    cancel_idle_shutdown(%{state | spawns: Map.put(state.spawns, pid, ref)})
   end
 
   defp drop_spawn(state, pid) when is_pid(pid) do
-    %{state | spawns: Map.delete(state.spawns, pid)}
+    schedule_idle_shutdown(%{state | spawns: Map.delete(state.spawns, pid)})
   end
 
   defp remote_async_call(state, ref, caller_parent, func, timeout)
@@ -324,6 +340,7 @@ defmodule Dragonfly.Runner do
         :timeout,
         :connect_timeout,
         :shutdown_timeout,
+        :idle_shutdown_after,
         :task_sup
       ])
 
@@ -351,6 +368,7 @@ defmodule Dragonfly.Runner do
       timeout: opts[:timeout] || 20_000,
       connect_timeout: opts[:connect_timeout] || 30_000,
       shutdown_timeout: opts[:shutdown_timeout] || 5_000,
+      idle_shutdown_after: opts[:idle_shutdown_after],
       task_sup: opts[:task_sup] || Dragonfly.TaskSupervisor
     }
   end
@@ -368,5 +386,19 @@ defmodule Dragonfly.Runner do
 
   defp debug(%{runner: %Runner{log: level}}, msg) do
     if level, do: Logger.log(level, msg)
+  end
+
+  defp cancel_idle_shutdown(state) do
+    if state.idle_timer, do: Process.cancel_timer(state.idle_timer)
+    %{state | idle_timer: nil}
+  end
+
+  defp schedule_idle_shutdown(%{runner: %Runner{} = runner} = state) do
+    state = cancel_idle_shutdown(state)
+    if runner.idle_shutdown_after do
+      %{state | idle_timer: Process.send_after(self(), :idle_shutdown, runner.idle_shutdown_after)}
+    else
+      state
+    end
   end
 end
