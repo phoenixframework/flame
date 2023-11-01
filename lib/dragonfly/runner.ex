@@ -18,7 +18,8 @@ defmodule Dragonfly.Runner do
              :status,
              :log,
              :connect_timeout,
-             :idle_shutdown_after
+             :idle_shutdown_after,
+             :idle_shutdown_check
            ]}
 
   defstruct id: nil,
@@ -34,7 +35,10 @@ defmodule Dragonfly.Runner do
             log: :info,
             connect_timeout: 10_000,
             shutdown_timeout: 5_000,
-            idle_shutdown_after: nil
+            idle_shutdown_after: nil,
+            idle_shutdown_check: nil
+
+  @idle_shutdown_check_timeout 5_000
 
   @doc """
   TODO
@@ -123,7 +127,11 @@ defmodule Dragonfly.Runner do
   @impl true
   def handle_info(:idle_shutdown, state) do
     # TODO – decide if we should break links here or not?
-    {:stop, :normal, state}
+    if idle_shutdown?(state) do
+      {:stop, :normal, state}
+    else
+      {:noreply, schedule_idle_shutdown(state)}
+    end
   end
 
   def handle_info({:remote_ok, ref}, state) do
@@ -359,6 +367,13 @@ defmodule Dragonfly.Runner do
           {backend, backend.init(opts)}
       end
 
+    {idle_shutdown_after_ms, idle_check} =
+      case Keyword.fetch(opts, :idle_shutdown_after) do
+        {:ok, ms} when is_integer(ms) -> {ms, true}
+        {:ok, {ms, func}} when is_integer(ms) and is_function(func, 0) -> {ms, func}
+        other when other in [{:ok, nil}, :error] -> {30_000, true}
+      end
+
     %Runner{
       status: :awaiting_boot,
       backend: backend,
@@ -368,7 +383,8 @@ defmodule Dragonfly.Runner do
       timeout: opts[:timeout] || 20_000,
       connect_timeout: opts[:connect_timeout] || 30_000,
       shutdown_timeout: opts[:shutdown_timeout] || 5_000,
-      idle_shutdown_after: opts[:idle_shutdown_after],
+      idle_shutdown_after: idle_shutdown_after_ms,
+      idle_shutdown_check: idle_check,
       task_sup: opts[:task_sup] || Dragonfly.TaskSupervisor
     }
   end
@@ -393,10 +409,35 @@ defmodule Dragonfly.Runner do
     %{state | idle_timer: nil}
   end
 
+  defp idle_shutdown?(%{runner: %Runner{} = runner} = state) do
+    case runner.idle_shutdown_check do
+      true ->
+        true
+
+      func when is_function(func) ->
+        ref = make_ref()
+        parent = self()
+
+        runner.backend.remote_spawn_link(state.backend_state, fn ->
+          send(parent, {ref, func.()})
+        end)
+
+        receive do
+          {^ref, result} -> result
+        after
+          @idle_shutdown_check_timeout -> true
+        end
+    end
+  end
+
   defp schedule_idle_shutdown(%{runner: %Runner{} = runner} = state) do
     state = cancel_idle_shutdown(state)
+
     if runner.idle_shutdown_after do
-      %{state | idle_timer: Process.send_after(self(), :idle_shutdown, runner.idle_shutdown_after)}
+      %{
+        state
+        | idle_timer: Process.send_after(self(), :idle_shutdown, runner.idle_shutdown_after)
+      }
     else
       state
     end

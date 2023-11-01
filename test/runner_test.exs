@@ -185,19 +185,36 @@ defmodule Dragonfly.RunnerTest do
     end
   end
 
-  test "idle shutdown" do
-    timeout = 500
-    {:ok, runner} = mock_successful_runner(0, idle_shutdown_after: timeout)
+  describe "idle shutdown" do
+    test "with time" do
+      timeout = 500
+      {:ok, runner} = mock_successful_runner(0, idle_shutdown_after: timeout)
 
-    Process.monitor(runner)
-    assert Runner.remote_boot(runner) == :ok
+      Process.monitor(runner)
+      assert Runner.remote_boot(runner) == :ok
 
-    assert_receive {:DOWN, _ref, :process, ^runner, :normal}, timeout * 2
+      assert_receive {:DOWN, _ref, :process, ^runner, :normal}, timeout * 2
 
-    {:ok, runner} = mock_successful_runner(1, idle_shutdown_after: timeout)
-    Process.monitor(runner)
-    assert Runner.remote_boot(runner) == :ok
-    assert Runner.call(runner, fn -> :works end) == :works
-    assert_receive {:DOWN, _ref, :process, ^runner, :normal}, timeout * 2
+      {:ok, runner} = mock_successful_runner(1, idle_shutdown_after: timeout)
+      Process.monitor(runner)
+      assert Runner.remote_boot(runner) == :ok
+      assert Runner.call(runner, fn -> :works end) == :works
+      assert_receive {:DOWN, _ref, :process, ^runner, :normal}, timeout * 2
+    end
+
+    test "with timed check" do
+      agent = start_supervised!({Agent, fn -> false end})
+      timeout = 500
+      idle_after = {timeout, fn -> Agent.get(agent, &(&1)) end}
+      # remote_spawn_link is expected to be called twice (2 idle checks)
+      {:ok, runner} = mock_successful_runner(2, idle_shutdown_after: idle_after)
+
+      Process.monitor(runner)
+      assert Runner.remote_boot(runner) == :ok
+
+      refute_receive {:DOWN, _ref, :process, ^runner, _}, timeout * 2
+      Agent.update(agent, fn _ -> true end)
+      assert_receive {:DOWN, _ref, :process, ^runner, :normal}, timeout * 2
+    end
   end
 end
