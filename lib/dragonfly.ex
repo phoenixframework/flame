@@ -52,7 +52,7 @@ defmodule Dragonfly do
   and worry about scaling the operation only in production.
 
   For production, Dragonfly provides the `Dragonfly.FlyBackend`, which uses
-  (Fly.io)[https://fly.io]. Because Fly deploys a containerized machine of
+  [Fly.io](https://fly.io). Because Fly deploys a containerized machine of
   your application, a single Fly API call can boot a machine running your
   exact Docker deployment image, allowing closures to be executed across
   distributed nodes.
