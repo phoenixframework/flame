@@ -57,6 +57,14 @@ defmodule Dragonfly do
   exact Docker deployment image, allowing closures to be executed across
   distributed nodes.
 
+  Default backends can be configured in your `config/runtime.exs`:
+
+      if config_env() == :prod do
+        config :dragonfly, :backend, Dragonfly.FlyBackend
+        config :dragonfly, Dragonfly.FlyBackend, token: System.fetch_env!("FLY_API_TOKEN")
+        ...
+      end
+
   ## Runners
 
   In practice, users will utilize the `Dragonfly.call/3` and `Dragonfly.cast/3` functions
@@ -71,6 +79,11 @@ defmodule Dragonfly do
       Runner.call(runner, fn -> :operation1 end)
       Runner.cast(runner, fn -> :operation2 end)
       Runner.shutdown(runner)
+
+  When a caller exits or crashes, the remote node will automatically be terminated.
+  For distributed erlang backends, like `Dragonfly.FlyBackend`, this will be
+  accomplished by the backend making use of  `Dragonfly.Backend.ParentMonitor`,
+  but other methods are possible.
 
   ## Pools
 
