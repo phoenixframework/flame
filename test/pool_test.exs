@@ -23,7 +23,7 @@ defmodule Dragonfly.PooTest do
   setup config do
     runner_opts = Map.fetch!(config, :runner)
     dyn_sup = Module.concat(config.test, "DynamicSup")
-    pool_pid = start_supervised!({Pool.Supervisor, Keyword.merge(runner_opts, name: config.test)})
+    pool_pid = start_supervised!({Pool, Keyword.merge(runner_opts, name: config.test)})
 
     {:ok, dyn_sup: dyn_sup, pool_pid: pool_pid}
   end

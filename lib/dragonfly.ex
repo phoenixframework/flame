@@ -95,7 +95,7 @@ defmodule Dragonfly do
   ## Pools
 
   Most workflows don't necessary need an entire node dedicated to a single function
-  execution. Dragonfly.Pool` provides a higher-level abstraction that manages a
+  execution. `Dragonfly.Pool` provides a higher-level abstraction that manages a
   pool of runners. It provides elastic runner scaling, allowing a minimum and
   maximum number of runners to be configured, and idle'd down as load decreases.
 

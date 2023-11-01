@@ -45,6 +45,14 @@ defmodule Dragonfly.Pool do
             runners: %{},
             runner_opts: []
 
+  def child_spec(opts) do
+    %{
+      id: {__MODULE__, Keyword.fetch!(opts, :name)},
+      start: {Dragonfly.Pool.Supervisor, :start_link, [opts]},
+      type: :supervisor
+    }
+  end
+
   @doc """
   TODO
   """

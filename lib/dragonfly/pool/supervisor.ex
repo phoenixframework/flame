@@ -15,7 +15,11 @@ defmodule Dragonfly.Pool.Supervisor do
       [
         {DynamicSupervisor, name: dynamic_sup, strategy: :one_for_one},
         {Task.Supervisor, name: task_sup},
-        {Dragonfly.Pool, pool_opts},
+        %{
+          id: {Dragonfly.Pool, Keyword.fetch!(opts, :name)},
+          start: {Dragonfly.Pool, :start_link, [pool_opts]},
+          type: :worker
+        }
       ]
 
     Supervisor.init(children, strategy: :one_for_all)
