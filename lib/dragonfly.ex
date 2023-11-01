@@ -130,12 +130,6 @@ defmodule Dragonfly do
 
   alias Dragonfly.Runner
 
-  def remote_boot(opts) do
-    {:ok, pid} = Runner.start_link(opts)
-    :ok = Runner.remote_boot(pid)
-    {:ok, pid}
-  end
-
   @doc """
   Calls a function in a remote runner.
 
