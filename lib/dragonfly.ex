@@ -65,6 +65,13 @@ defmodule Dragonfly do
         ...
       end
 
+  And then started in your supervision tree:
+
+      children = [
+        ...,
+        Dragonfly.FlyBackend,
+      ]
+
   ## Runners
 
   In practice, users will utilize the `Dragonfly.call/3` and `Dragonfly.cast/3` functions
@@ -100,6 +107,7 @@ defmodule Dragonfly do
 
       children = [
         ...,
+        Dragonfly.FlyBackend,
         {Dragonfly.Pool,
          name: App.FFMpegRunner,
          min: 0,
