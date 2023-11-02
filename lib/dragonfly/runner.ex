@@ -295,6 +295,12 @@ defmodule Dragonfly.Runner do
     parent = self()
     timeout = timeout || state.runner.timeout
 
+    # TODO
+    # avoid copying by moving to caller
+    # erpc call starts remote process.
+    # terminator process is told something is running within deadline
+    # kill me if deadline is reached
+    #
     result =
       runner.backend.remote_spawn_link(state.backend_state, fn ->
         # This runs on the remote node. Supervise the task so we can monitor it,

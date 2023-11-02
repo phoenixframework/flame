@@ -24,6 +24,7 @@ defmodule Dragonfly.Backend.ParentMonitor do
     end
   end
 
+  # TODO idle here or terminator
   @impl true
   def init(opts) do
     :global_group.monitor_nodes(true)
