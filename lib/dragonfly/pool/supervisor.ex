@@ -8,13 +8,11 @@ defmodule Dragonfly.Pool.Supervisor do
   def init(opts) do
     name = Keyword.fetch!(opts, :name)
     dynamic_sup = Module.concat(name, "DynamicSup")
-    task_sup = Module.concat(name, "TaskSup")
-    pool_opts = Keyword.merge(opts, dynamic_sup: dynamic_sup, task_sup: task_sup)
+    pool_opts = Keyword.merge(opts, dynamic_sup: dynamic_sup)
 
     children =
       [
         {DynamicSupervisor, name: dynamic_sup, strategy: :one_for_one},
-        {Task.Supervisor, name: task_sup},
         %{
           id: {Dragonfly.Pool, Keyword.fetch!(opts, :name)},
           start: {Dragonfly.Pool, :start_link, [pool_opts]},

@@ -34,7 +34,6 @@ defmodule Dragonfly.Pool do
 
   defstruct name: nil,
             dynamic_sup: nil,
-            task_sup: nil,
             boot_timeout: nil,
             idle_shutdown_after: nil,
             min: nil,
@@ -90,7 +89,6 @@ defmodule Dragonfly.Pool do
   def init(opts) do
     state = %Pool{
       dynamic_sup: Keyword.fetch!(opts, :dynamic_sup),
-      task_sup: Keyword.fetch!(opts, :task_sup),
       name: Keyword.fetch!(opts, :name),
       min: Keyword.fetch!(opts, :min),
       max: Keyword.fetch!(opts, :max),
@@ -108,7 +106,6 @@ defmodule Dragonfly.Pool do
             :connect_timeout,
             :shutdown_timeout,
             :idle_shutdown_after,
-            :task_sup
           ]
         )
     }

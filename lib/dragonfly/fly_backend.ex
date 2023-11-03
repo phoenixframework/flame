@@ -5,14 +5,6 @@ defmodule Dragonfly.FlyBackend do
 
   require Logger
 
-  def child_spec(opts) do
-    %{
-      id: __MODULE__,
-      start: {Dragonfly.FlyBackend.Supervisor, :start_link, [opts]},
-      type: :supervisor
-    }
-  end
-
   @derive {Inspect,
            only: [
              :host,
@@ -70,7 +62,7 @@ defmodule Dragonfly.FlyBackend do
     end
 
     parent_ref = make_ref()
-    encoded_parent = encode_term({parent_ref, self()})
+    encoded_parent = Dragonfly.Parent.encode(parent_ref, self(), __MODULE__)
 
     new_env =
       Map.merge(
@@ -86,15 +78,15 @@ defmodule Dragonfly.FlyBackend do
 
   @impl true
   # TODO explore spawn_request
-  def remote_spawn_link(%FlyBackend{} = state, term) do
+  def remote_spawn_monitor(%FlyBackend{} = state, term) do
     case term do
       func when is_function(func, 0) ->
-        pid = Node.spawn_link(state.runner_node_name, func)
-        {:ok, pid, state}
+        {pid, ref} = Node.spawn_monitor(state.runner_node_name, func)
+        {:ok, {pid, ref}}
 
       {mod, fun, args} when is_atom(mod) and is_atom(fun) and is_list(args) ->
-        pid = Node.spawn_link(state.runner_node_name, mod, fun, args)
-        {:ok, pid, state}
+        {pid, ref} = Node.spawn_monitor(state.runner_node_name, mod, fun, args)
+        {:ok, {pid, ref}}
 
       other ->
         raise ArgumentError,
@@ -186,9 +178,5 @@ defmodule Dragonfly.FlyBackend do
 
   defp rand_id(len) do
     len |> :crypto.strong_rand_bytes() |> Base.encode64(padding: false) |> binary_part(0, len)
-  end
-
-  defp encode_term(term) do
-    term |> :erlang.term_to_binary() |> Base.encode64()
   end
 end

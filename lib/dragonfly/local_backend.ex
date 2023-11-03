@@ -16,15 +16,15 @@ defmodule Dragonfly.LocalBackend do
   def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
-  def remote_spawn_link(state, term) do
+  def remote_spawn_monitor(_state, term) do
     case term do
       func when is_function(func, 0) ->
-        pid = spawn_link(func)
-        {:ok, pid, state}
+        {pid, ref} = spawn_monitor(func)
+        {:ok, {pid, ref}}
 
       {mod, fun, args} when is_atom(mod) and is_atom(fun) and is_list(args) ->
-        pid = spawn_link(mod, fun, args)
-        {:ok, pid, state}
+        {pid, ref} = spawn_monitor(mod, fun, args)
+        {:ok, {pid, ref}}
 
       other ->
         raise ArgumentError,

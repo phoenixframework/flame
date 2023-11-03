@@ -1,7 +1,7 @@
 defmodule Dragonfly.Backend do
   @callback init(opts :: Keyword.t()) :: {:ok, state :: term()} | {:error, term()}
-  @callback remote_spawn_link(state :: term, func :: function() | term) ::
-              {:ok, pid, new_state :: term} | {:error, reason :: term, new_state :: term}
+  @callback remote_spawn_monitor(state :: term, func :: function() | term) ::
+              {:ok, {pid, reference()}} | {:error, reason :: term}
   @callback system_shutdown() :: no_return()
   @callback remote_boot(state :: term) :: {:ok, new_state :: term} | {:error, term}
   @callback handle_info(msg :: term, state :: term) ::
@@ -9,8 +9,8 @@ defmodule Dragonfly.Backend do
 
   def init(opts), do: impl().init(opts)
 
-  def remote_spawn_link(state, func) do
-    impl().remote_spawn_link(state, func)
+  def remote_spawn_monitor(state, func) do
+    impl().remote_spawn_monitor(state, func)
   end
 
   def system_shutdown do

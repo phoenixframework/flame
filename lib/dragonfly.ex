@@ -89,8 +89,8 @@ defmodule Dragonfly do
 
   When a caller exits or crashes, the remote node will automatically be terminated.
   For distributed erlang backends, like `Dragonfly.FlyBackend`, this will be
-  accomplished by the backend making use of  `Dragonfly.Backend.ParentMonitor`,
-  but other methods are possible.
+  accomplished automatically by the `Dragonfly.Terminator`, but other methods
+  are possible.
 
   ## Pools
 
