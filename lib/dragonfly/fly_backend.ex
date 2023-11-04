@@ -12,7 +12,7 @@ defmodule Dragonfly.FlyBackend do
              :image,
              :app,
              :runner_id,
-             :machine_pid,
+             :remote_terminator_pid,
              :runner_node_basename,
              :runner_instance_id,
              :runner_private_ip,
@@ -27,7 +27,7 @@ defmodule Dragonfly.FlyBackend do
             token: nil,
             connect_timeout: nil,
             runner_id: nil,
-            machine_pid: nil,
+            remote_terminator_pid: nil,
             parent_ref: nil,
             runner_node_basename: nil,
             runner_instance_id: nil,
@@ -35,7 +35,7 @@ defmodule Dragonfly.FlyBackend do
             runner_node_name: nil
 
   @impl true
-  def init(opts) do
+  def init(%Dragonfly.Runner{}, opts) do
     :global_group.monitor_nodes(true)
     conf = Enum.into(Application.get_env(:dragonfly, __MODULE__) || [], %{})
     [node_base | _] = node() |> to_string() |> String.split("@")
@@ -99,7 +99,7 @@ defmodule Dragonfly.FlyBackend do
     System.stop()
   end
 
-  defp with_elapsed_ms(func) when is_function(func, 0) do
+  def with_elapsed_ms(func) when is_function(func, 0) do
     {micro, result} = :timer.tc(func)
     {result, div(micro, 1000)}
   end
@@ -138,17 +138,18 @@ defmodule Dragonfly.FlyBackend do
               runner_node_name: :"#{state.runner_node_basename}@#{ip}"
           }
 
-        machine_pid =
+        remote_terminator_pid =
           receive do
-            {^parent_ref, :up, machine_pid} ->
-              machine_pid
+            {^parent_ref, :remote_up, remote_terminator_pid} ->
+              remote_terminator_pid
           after
             remaining_connect_window ->
               Logger.error("failed to connect to fly machine within #{state.connect_timeout}ms")
               exit(:timeout)
           end
 
-        {:ok, %{new_state | machine_pid: machine_pid}}
+        new_state = %FlyBackend{new_state | remote_terminator_pid: remote_terminator_pid}
+        {:ok, remote_terminator_pid, new_state}
 
       other ->
         {:error, other}
@@ -157,7 +158,7 @@ defmodule Dragonfly.FlyBackend do
 
   @impl true
   # TODO maybe remove this
-  def handle_info({_parent_ref, :up, _}, state) do
+  def handle_info({_parent_ref, :remote_up, _}, state) do
     {:noreply, state}
   end
 
@@ -171,9 +172,8 @@ defmodule Dragonfly.FlyBackend do
 
   def handle_info({:nodeup, _}, state), do: {:noreply, state}
 
-  def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
-    ^pid = state.machine_pid
-    {:stop, {:shutdown, reason}, state}
+  def handle_info(_msg, state) do
+    {:noreply, state}
   end
 
   defp rand_id(len) do

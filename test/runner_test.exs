@@ -29,7 +29,7 @@ defmodule Dragonfly.RunnerTest do
     test_pid = self()
 
     MockBackend
-    |> expect(:init, fn _opts -> {:ok, :state} end)
+    |> expect(:init, fn %Runner{}, _opts -> {:ok, :state} end)
     |> expect(:remote_boot, fn :state -> {:ok, @post_success} end)
     |> expect(:remote_spawn_monitor, executions, fn @post_success = _state, func ->
       {:ok, spawn_monitor(func)}
@@ -78,7 +78,7 @@ defmodule Dragonfly.RunnerTest do
     test_pid = self()
 
     MockBackend
-    |> expect(:init, fn _opts -> {:ok, :state} end)
+    |> expect(:init, fn %Runner{}, _opts -> {:ok, :state} end)
     |> expect(:remote_boot, fn :state -> {:ok, @post_success} end)
     |> expect(:remote_spawn_monitor, 2, fn @post_success = _state, func ->
       {:ok, spawn_monitor(func)}
@@ -114,7 +114,7 @@ defmodule Dragonfly.RunnerTest do
 
   test "backend runner spawn connect failure" do
     MockBackend
-    |> expect(:init, fn _opts -> {:ok, :state} end)
+    |> expect(:init, fn %Runner{}, _opts -> {:ok, :state} end)
     |> expect(:remote_boot, fn :state -> {:error, :invalid_authentication} end)
 
     {:ok, runner} =
@@ -128,7 +128,7 @@ defmodule Dragonfly.RunnerTest do
 
   test "backend runner boot failure" do
     MockBackend
-    |> expect(:init, fn _opts -> {:ok, :state} end)
+    |> expect(:init, fn %Runner{}, _opts -> {:ok, :state} end)
     |> expect(:remote_boot, fn :state -> {:error, :nxdomain} end)
 
     {:ok, runner} =

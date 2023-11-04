@@ -123,13 +123,11 @@ defmodule Dragonfly.Terminator do
   end
 
   def handle_info({:DOWN, ref, :process, pid, _reason}, %Terminator{} = state) do
-    case state.parent do
-      %Parent{pid: ^pid} ->
-        system_stop(state, "parent pid #{inspect(pid)} went away. Going down")
-        {:stop, {:shutdown, :noconnection}, state}
-
-      nil ->
-        {:noreply, drop_caller(state, ref)}
+    if state.parent && state.parent.pid == pid do
+      system_stop(state, "parent pid #{inspect(pid)} went away. Going down")
+      {:stop, {:shutdown, :noconnection}, state}
+    else
+      {:noreply, drop_caller(state, ref)}
     end
   end
 
@@ -158,7 +156,7 @@ defmodule Dragonfly.Terminator do
   def handle_info(:idle_shutdown, state) do
     if state.idle_shutdown_check.() do
       system_stop(state, "idle shutdown")
-      {:noreply, state}
+      {:stop, {:shutdown, :idle}, state}
     else
       {:noreply, schedule_idle_shutdown(state)}
     end
@@ -183,22 +181,17 @@ defmodule Dragonfly.Terminator do
   def terminate(_reason, %Terminator{} = state) do
     state = cancel_idle_shutdown(state)
 
-    case map_size(state.calls) do
-      0 ->
-        :ok
+    if map_size(state.calls) == 0 do
+      :ok
+    else
+      Process.send_after(self(), :shutdown_timeout, state.shutdown_timeout)
 
-      count ->
-        Process.send_after(self(), :shutdown_timeout, state.shutdown_timeout)
-        receive_downs(count)
-    end
-  end
-
-  defp receive_downs(0), do: :ok
-
-  defp receive_downs(remaining) do
-    receive do
-      {:DOWN, _, :process, _pid, _reason} -> receive_downs(remaining - 1)
-      :shutdown_timeout -> :ok
+      Enum.each(state.calls, fn {ref, %Caller{}} ->
+        receive do
+          {:DOWN, ^ref, :process, _pid, _reason} -> :ok
+          :shutdown_timeout -> :ok
+        end
+      end)
     end
   end
 
@@ -254,7 +247,7 @@ defmodule Dragonfly.Terminator do
     if connected? do
       state.failsafe_timer && Process.cancel_timer(state.failsafe_timer)
       ref = Process.monitor(parent.pid)
-      send(parent.pid, {parent.ref, :up, self()})
+      send(parent.pid, {parent.ref, :remote_up, self()})
 
       %Terminator{
         state
@@ -272,8 +265,8 @@ defmodule Dragonfly.Terminator do
     end
   end
 
-  defp system_stop(%Terminator{} = state, reason) do
-    log(state, "#{inspect(__MODULE__)}.system_stop: #{inspect(reason)}")
+  defp system_stop(%Terminator{} = state, log) do
+    log(state, "#{inspect(__MODULE__)}.system_stop: #{log}")
     state.backend.system_shutdown()
   end
 

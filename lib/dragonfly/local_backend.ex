@@ -3,16 +3,25 @@ defmodule Dragonfly.LocalBackend do
   @behaviour Dragonfly.Backend
 
   @impl true
-  def init(opts) do
-    defaults = Application.get_env(:dragonfly, __MODULE__) || []
+  def init(%Dragonfly.Runner{} = runner, opts) do
+    defaults =
+      Application.get_env(:dragonfly, __MODULE__) || []
 
     {:ok,
      defaults
      |> Keyword.merge(opts)
-     |> Enum.into(%{})}
+     |> Enum.into(%{})
+     |> Map.merge(%{terminator: runner.terminator})}
   end
 
   @impl true
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
+    case state.terminator_ref do
+      ^ref -> {:stop, {:shutdown, reason}, state}
+      _ref -> {:noreply, state}
+    end
+  end
+
   def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
@@ -37,6 +46,9 @@ defmodule Dragonfly.LocalBackend do
 
   @impl true
   def remote_boot(state) do
-    {:ok, state}
+    case Process.whereis(state.terminator) do
+      pid when is_pid(pid) -> {:ok, pid, state}
+      nil -> {:error, :noproc}
+    end
   end
 end

@@ -123,6 +123,7 @@ defmodule Dragonfly.Runner do
       {:ok, backend_state} ->
         state = %{
           runner: runner,
+          remote_terminator_pid: nil,
           checkouts: %{},
           backend_state: backend_state
         }
@@ -135,21 +136,27 @@ defmodule Dragonfly.Runner do
   end
 
   @impl true
-  def handle_info({:DOWN, ref, :process, _pid, reason} = msg, state) do
+  def handle_info({:DOWN, ref, :process, pid, reason} = msg, state) do
     %{runner: %Runner{} = runner} = state
 
-    case state.checkouts do
-      %{^ref => _from_pid} ->
-        new_state = drop_checkout(state, ref)
+    case state do
+      %{remote_terminator_pid: ^pid} ->
+        {:stop, reason, state}
 
-        if runner.single_use do
-          {:stop, {:shutdown, reason}, new_state}
-        else
-          {:noreply, new_state}
+      %{remote_terminator_pid: _} ->
+        case state.checkouts do
+          %{^ref => _from_pid} ->
+            new_state = drop_checkout(state, ref)
+
+            if runner.single_use do
+              {:stop, {:shutdown, reason}, new_state}
+            else
+              {:noreply, new_state}
+            end
+
+          %{} ->
+            {:noreply, maybe_backend_handle_info(state, msg)}
         end
-
-      %{} ->
-        {:noreply, maybe_backend_handle_info(state, msg)}
     end
   end
 
@@ -220,9 +227,17 @@ defmodule Dragonfly.Runner do
       :awaiting_boot ->
         time(runner, "runner connect", fn ->
           case runner.backend.remote_boot(backend_state) do
-            {:ok, new_backend_state} ->
+            {:ok, remote_terminator_pid, new_backend_state} ->
+              IO.inspect({:monitor, remote_terminator_pid})
+              Process.monitor(remote_terminator_pid)
               new_runner = %Runner{runner | status: :booted}
-              new_state = %{state | runner: new_runner, backend_state: new_backend_state}
+
+              new_state = %{
+                state
+                | runner: new_runner,
+                  backend_state: new_backend_state,
+                  remote_terminator_pid: remote_terminator_pid
+              }
 
               %Runner{
                 idle_shutdown_after: idle_after,
@@ -262,21 +277,6 @@ defmodule Dragonfly.Runner do
         :terminator
       ])
 
-    {backend, backend_opts} =
-      case Keyword.fetch(opts, :backend) do
-        {:ok, backend} when is_atom(backend) ->
-          opts = Application.get_env(:dragonfly, backend) || []
-          {backend, backend.init(opts)}
-
-        {:ok, {backend, opts}} when is_atom(backend) and is_list(opts) ->
-          {backend, backend.init(opts)}
-
-        :error ->
-          backend = Backend.impl()
-          opts = Application.get_env(:dragonfly, backend) || []
-          {backend, backend.init(opts)}
-      end
-
     {idle_shutdown_after_ms, idle_check} =
       case Keyword.fetch(opts, :idle_shutdown_after) do
         {:ok, ms} when is_integer(ms) -> {ms, fn -> true end}
@@ -284,19 +284,37 @@ defmodule Dragonfly.Runner do
         other when other in [{:ok, nil}, :error] -> {30_000, fn -> true end}
       end
 
-    %Runner{
-      status: :awaiting_boot,
-      backend: backend,
-      backend_init: backend_opts,
-      log: Keyword.get(opts, :log, :info),
-      single_use: Keyword.get(opts, :single_use, false),
-      timeout: opts[:timeout] || 20_000,
-      connect_timeout: opts[:connect_timeout] || 30_000,
-      shutdown_timeout: opts[:shutdown_timeout] || 5_000,
-      idle_shutdown_after: idle_shutdown_after_ms,
-      idle_shutdown_check: idle_check,
-      terminator: opts[:terminator] || Dragonfly.Terminator
-    }
+    runner =
+      %Runner{
+        status: :awaiting_boot,
+        backend: :pending,
+        backend_init: :pending,
+        log: Keyword.get(opts, :log, :info),
+        single_use: Keyword.get(opts, :single_use, false),
+        timeout: opts[:timeout] || 20_000,
+        connect_timeout: opts[:connect_timeout] || 30_000,
+        shutdown_timeout: opts[:shutdown_timeout] || 5_000,
+        idle_shutdown_after: idle_shutdown_after_ms,
+        idle_shutdown_check: idle_check,
+        terminator: opts[:terminator] || Dragonfly.Terminator
+      }
+
+    {backend, backend_init} =
+      case Keyword.fetch(opts, :backend) do
+        {:ok, backend} when is_atom(backend) ->
+          opts = Application.get_env(:dragonfly, backend) || []
+          {backend, backend.init(runner, opts)}
+
+        {:ok, {backend, opts}} when is_atom(backend) and is_list(opts) ->
+          {backend, backend.init(runner, opts)}
+
+        :error ->
+          backend = Backend.impl()
+          opts = Application.get_env(:dragonfly, backend) || []
+          {backend, backend.init(runner, opts)}
+      end
+
+    %Runner{runner | backend: backend, backend_init: backend_init}
   end
 
   defp time(%Runner{log: :debug}, label, func) do

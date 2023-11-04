@@ -1,9 +1,10 @@
 defmodule Dragonfly.Backend do
-  @callback init(opts :: Keyword.t()) :: {:ok, state :: term()} | {:error, term()}
+  @callback init(Runner.t(), opts :: Keyword.t()) :: {:ok, state :: term()} | {:error, term()}
   @callback remote_spawn_monitor(state :: term, func :: function() | term) ::
               {:ok, {pid, reference()}} | {:error, reason :: term}
   @callback system_shutdown() :: no_return()
-  @callback remote_boot(state :: term) :: {:ok, new_state :: term} | {:error, term}
+  @callback remote_boot(state :: term) ::
+              {:ok, remote_terminator_pid :: pid(), new_state :: term} | {:error, term}
   @callback handle_info(msg :: term, state :: term) ::
               {:noreply, new_state :: term} | {:stop, term, new_state :: term}
 

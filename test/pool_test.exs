@@ -21,7 +21,17 @@ defmodule Dragonfly.PooTest do
   end
 
   setup config do
-    runner_opts = Map.fetch!(config, :runner)
+    runner_opts =
+      config
+      |> Map.fetch!(:runner)
+      |> Keyword.merge(
+        terminator: [
+          name: __MODULE__.TestTerminator,
+          shutdown_timeout: 10_000,
+          failsafe_timeout: 10_000
+        ]
+      )
+
     dyn_sup = Module.concat(config.test, "DynamicSup")
     pool_pid = start_supervised!({Pool, Keyword.merge(runner_opts, name: config.test)})
 
@@ -59,6 +69,7 @@ defmodule Dragonfly.PooTest do
 
   @tag runner: [min: 1, max: 2, max_concurrency: 2, idle_shutdown_after: 500]
   test "idle shutdown", %{dyn_sup: dyn_sup} = config do
+    Process.monitor(term)
     sim_long_running(config.test, 100)
     sim_long_running(config.test, 100)
     sim_long_running(config.test, 100)
@@ -71,8 +82,8 @@ defmodule Dragonfly.PooTest do
 
     Process.monitor(runner1)
     Process.monitor(runner2)
-    assert_receive {:DOWN, _ref, :process, ^runner2, :normal}, 1000
-    refute_receive {:DOWN, _ref, :process, ^runner1, :normal}
+    assert_receive {:DOWN, _ref, :process, ^runner2, {:shutdown, :idle}}, 1000
+    refute_receive {:DOWN, _ref, :process, ^runner1, {:shutdown, :idle}}
 
     assert [{:undefined, ^runner1, :worker, [Dragonfly.Runner]}] =
              Supervisor.which_children(dyn_sup)

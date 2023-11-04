@@ -3,7 +3,7 @@ defmodule Dragonfly.Pool.RunnerState do
 end
 
 defmodule Dragonfly.Pool.WaitingState do
-  defstruct from: nil, func: nil, opts: nil, monitor_ref: nil
+  defstruct from: nil, monitor_ref: nil
 end
 
 defmodule Dragonfly.Pool do
@@ -26,11 +26,9 @@ defmodule Dragonfly.Pool do
   alias Dragonfly.{Pool, Runner}
   alias Dragonfly.Pool.{RunnerState, WaitingState}
 
-  @default_timeout 20_000
   @default_max_concurrency 100
   @boot_timeout 20_000
   @idle_shutdown_after 20_000
-  @ok_async_call :ok_async_call
 
   defstruct name: nil,
             dynamic_sup: nil,
@@ -59,7 +57,7 @@ defmodule Dragonfly.Pool do
     Keyword.validate!(opts, [
       :name,
       :dynamic_sup,
-      :task_sup,
+      :terminator,
       :idle_shutdown_after,
       :min,
       :max,
@@ -79,10 +77,27 @@ defmodule Dragonfly.Pool do
   TODO
   """
   def call(name, func, opts \\ []) do
-    case GenServer.call(name, {:call, func, opts}, opts[:timeout] || @default_timeout) do
-      {:ok, res} -> res
-      {:exit, reason} -> exit(reason)
-    end
+    {{ref, runner_pid}, opts} =
+      with_elapsed_timeout(opts, fn -> GenServer.call(name, :checkout, opts[:timeout] || 5000) end)
+
+    result = Runner.call(runner_pid, func, opts[:timeout])
+    :ok = GenServer.call(name, {:checkin, ref})
+    result
+  end
+
+  defp with_elapsed_timeout(opts, func) do
+    {micro, result} = :timer.tc(func)
+    elapsed_ms = div(micro, 1000)
+
+    opts =
+      case Keyword.fetch(opts, :timeout) do
+        {:ok, :infinity} -> opts
+        {:ok, ms} when is_integer(ms) -> Keyword.put(opts, :timeout, ms - elapsed_ms)
+        {:ok, nil} -> opts
+        :error -> opts
+      end
+
+    {result, opts}
   end
 
   @impl true
@@ -106,6 +121,7 @@ defmodule Dragonfly.Pool do
             :connect_timeout,
             :shutdown_timeout,
             :idle_shutdown_after,
+            :terminator
           ]
         )
     }
@@ -114,45 +130,17 @@ defmodule Dragonfly.Pool do
   end
 
   @impl true
-  def handle_info({task_ref, @ok_async_call}, state) do
-    state =
-      case state.callers do
-        # we already replied to caller on success inside task
-        %{^task_ref => {_from, runner_ref}} ->
-          Process.demonitor(task_ref, [:flush])
-          new_state = %Pool{state | callers: Map.delete(state.callers, task_ref)}
-
-          new_state
-          |> dec_runner_count(runner_ref)
-          |> flush_downs()
-          |> call_next_waiting_caller()
-
-        %{} ->
-          state
-      end
-
-    {:noreply, state}
-  end
-
-  @impl true
   def handle_info({:DOWN, _ref, :process, _pid, _reason} = msg, %Pool{} = state) do
-    callers_before = state.callers
-
-    new_state =
-      state
-      |> handle_down(msg)
-      |> flush_downs()
-
-    if callers_before != new_state.callers do
-      {:noreply, call_next_waiting_caller(new_state)}
-    else
-      {:noreply, new_state}
-    end
+    {:noreply, handle_down(state, msg)}
   end
 
   @impl true
-  def handle_call({:call, func, opts}, from, state) do
-    {:noreply, call_runner(state, from, func, opts)}
+  def handle_call(:checkout, from, state) do
+    {:noreply, checkout_runner(state, from)}
+  end
+
+  def handle_call({:checkin, ref}, _from, state) do
+    {:reply, :ok, checkin_runner(state, ref)}
   end
 
   defp min_runner(state) do
@@ -164,7 +152,14 @@ defmodule Dragonfly.Pool do
     end
   end
 
-  defp call_runner(%Pool{} = state, from, func, opts) do
+  defp checkin_runner(state, ref) do
+    %{^ref => {_from, runner_ref}} = state.callers
+    Process.demonitor(ref, [:flush])
+
+    drop_caller(state, ref, runner_ref)
+  end
+
+  defp checkout_runner(%Pool{} = state, from, monitor_ref \\ nil) do
     min_runner = min_runner(state)
     runner_count = map_size(state.runners)
 
@@ -174,7 +169,7 @@ defmodule Dragonfly.Pool do
           {:ok, %RunnerState{} = runner} ->
             state
             |> put_runner(runner)
-            |> async_runner_call(runner, from, func, opts)
+            |> reply_runner_checkout(runner, from, monitor_ref)
 
           {:error, reason} ->
             GenServer.reply(from, {:error, reason})
@@ -182,30 +177,31 @@ defmodule Dragonfly.Pool do
         end
 
       min_runner && min_runner.count < state.max_concurrency ->
-        async_runner_call(state, min_runner, from, func, opts)
+        reply_runner_checkout(state, min_runner, from, monitor_ref)
 
       true ->
-        waiting_in(state, from, func, opts)
+        waiting_in(state, from)
     end
   end
 
-  defp async_runner_call(state, %RunnerState{monitor_ref: runner_ref} = runner, from, func, opts)
-       when is_function(func, 0) do
-    task =
-      Task.Supervisor.async_nolink(state.task_sup, fn ->
-        result = Runner.call(runner.pid, func, opts[:timeout])
-        # reply directly to caller here to avoid copying
-        GenServer.reply(from, {:ok, result})
-        @ok_async_call
-      end)
+  defp reply_runner_checkout(state, %RunnerState{} = runner, from, monitor_ref) do
+    # we pass monitor_ref down from waiting so we don't need to remonitor if already monitoring
+    ref =
+      if monitor_ref do
+        monitor_ref
+      else
+        {from_pid, _tag} = from
+        Process.monitor(from_pid)
+      end
 
-    new_state = %Pool{state | callers: Map.put(state.callers, task.ref, {from, runner_ref})}
-    inc_runner_count(new_state, runner_ref)
+    GenServer.reply(from, {ref, runner.pid})
+    new_state = %Pool{state | callers: Map.put(state.callers, ref, {from, runner.monitor_ref})}
+    inc_runner_count(new_state, runner.monitor_ref)
   end
 
-  defp waiting_in(%Pool{} = state, {pid, _tag} = from, func, opts) when is_function(func, 0) do
+  defp waiting_in(%Pool{} = state, {pid, _tag} = from) do
     ref = Process.monitor(pid)
-    waiting = %WaitingState{from: from, func: func, opts: opts, monitor_ref: ref}
+    waiting = %WaitingState{from: from, monitor_ref: ref}
     %Pool{state | waiting: state.waiting ++ [waiting]}
   end
 
@@ -278,24 +274,29 @@ defmodule Dragonfly.Pool do
     %Pool{state | runners: Map.delete(state.runners, ref)}
   end
 
-  defp notify_caller(%Pool{} = state, task_ref, runner_ref, from, reply) do
-    GenServer.reply(from, reply)
-    new_state = %Pool{state | callers: Map.delete(state.callers, task_ref)}
-    dec_runner_count(new_state, runner_ref)
+  defp drop_caller(%Pool{} = state, caller_ref, runner_ref) do
+    new_state = %Pool{state | callers: Map.delete(state.callers, caller_ref)}
+
+    new_state
+    |> dec_runner_count(runner_ref)
+    |> call_next_waiting_caller()
   end
 
   defp call_next_waiting_caller(%Pool{} = state) do
-    case state.waiting do
+    # we flush DOWN's so we don't send a lease to a waiting caller that is already down
+    new_state = flush_downs(state)
+
+    case new_state.waiting do
       [] ->
-        state
+        new_state
 
       [%WaitingState{} = first | rest] ->
-        Process.demonitor(first.monitor_ref, [:flush])
-        call_runner(%Pool{state | waiting: rest}, first.from, first.func, first.opts)
+        # checkout_runner will borrow already running monitor
+        checkout_runner(%Pool{new_state | waiting: rest}, first.from, first.monitor_ref)
     end
   end
 
-  defp handle_down(%Pool{} = state, {:DOWN, ref, :process, _pid, reason}) do
+  defp handle_down(%Pool{} = state, {:DOWN, ref, :process, _pid, _reason}) do
     new_waiting =
       Enum.filter(state.waiting, fn %WaitingState{} = waiting ->
         waiting.monitor_ref != ref
@@ -305,8 +306,8 @@ defmodule Dragonfly.Pool do
 
     state =
       case state.callers do
-        %{^ref => {from, runner_ref}} ->
-          notify_caller(state, ref, runner_ref, from, {:exit, reason})
+        %{^ref => {_from, runner_ref}} ->
+          drop_caller(state, ref, runner_ref)
 
         %{} ->
           state
