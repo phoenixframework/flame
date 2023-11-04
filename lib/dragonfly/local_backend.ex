@@ -11,7 +11,7 @@ defmodule Dragonfly.LocalBackend do
      defaults
      |> Keyword.merge(opts)
      |> Enum.into(%{})
-     |> Map.merge(%{terminator: runner.terminator})}
+     |> Map.merge(%{terminator_pid: nil, log: runner.log})}
   end
 
   @impl true
@@ -46,9 +46,8 @@ defmodule Dragonfly.LocalBackend do
 
   @impl true
   def remote_boot(state) do
-    case Process.whereis(state.terminator) do
-      pid when is_pid(pid) -> {:ok, pid, state}
-      nil -> {:error, :noproc}
-    end
+    {:ok, terminator_pid} = Dragonfly.Terminator.start_link(name: nil, log: state.log)
+    IO.inspect({:started, terminator_pid})
+    {:ok, terminator_pid, %{state | terminator_pid: terminator_pid}}
   end
 end

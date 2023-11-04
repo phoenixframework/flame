@@ -123,7 +123,6 @@ defmodule Dragonfly.Runner do
       {:ok, backend_state} ->
         state = %{
           runner: runner,
-          remote_terminator_pid: nil,
           checkouts: %{},
           backend_state: backend_state
         }
@@ -139,11 +138,11 @@ defmodule Dragonfly.Runner do
   def handle_info({:DOWN, ref, :process, pid, reason} = msg, state) do
     %{runner: %Runner{} = runner} = state
 
-    case state do
-      %{remote_terminator_pid: ^pid} ->
+    case runner do
+      %Runner{terminator: ^pid} ->
         {:stop, reason, state}
 
-      %{remote_terminator_pid: _} ->
+      %Runner{terminator: _} ->
         case state.checkouts do
           %{^ref => _from_pid} ->
             new_state = drop_checkout(state, ref)
@@ -230,20 +229,14 @@ defmodule Dragonfly.Runner do
             {:ok, remote_terminator_pid, new_backend_state} ->
               IO.inspect({:monitor, remote_terminator_pid})
               Process.monitor(remote_terminator_pid)
-              new_runner = %Runner{runner | status: :booted}
-
-              new_state = %{
-                state
-                | runner: new_runner,
-                  backend_state: new_backend_state,
-                  remote_terminator_pid: remote_terminator_pid
-              }
+              new_runner = %Runner{runner | terminator: remote_terminator_pid, status: :booted}
+              new_state = %{state | runner: new_runner, backend_state: new_backend_state}
 
               %Runner{
                 idle_shutdown_after: idle_after,
                 idle_shutdown_check: idle_check,
                 terminator: term
-              } = runner
+              } = new_runner
 
               :ok =
                 remote_call(runner, new_backend_state, runner.connect_timeout, fn ->
@@ -274,7 +267,6 @@ defmodule Dragonfly.Runner do
         :connect_timeout,
         :shutdown_timeout,
         :idle_shutdown_after,
-        :terminator
       ])
 
     {idle_shutdown_after_ms, idle_check} =
@@ -296,7 +288,7 @@ defmodule Dragonfly.Runner do
         shutdown_timeout: opts[:shutdown_timeout] || 5_000,
         idle_shutdown_after: idle_shutdown_after_ms,
         idle_shutdown_check: idle_check,
-        terminator: opts[:terminator] || Dragonfly.Terminator
+        terminator: nil
       }
 
     {backend, backend_init} =

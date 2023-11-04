@@ -57,7 +57,6 @@ defmodule Dragonfly.Pool do
     Keyword.validate!(opts, [
       :name,
       :dynamic_sup,
-      :terminator,
       :idle_shutdown_after,
       :min,
       :max,
@@ -121,7 +120,6 @@ defmodule Dragonfly.Pool do
             :connect_timeout,
             :shutdown_timeout,
             :idle_shutdown_after,
-            :terminator
           ]
         )
     }

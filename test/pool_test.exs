@@ -1,4 +1,4 @@
-defmodule Dragonfly.PooTest do
+defmodule Dragonfly.PoolTest do
   use ExUnit.Case, async: true
 
   alias Dragonfly.Pool
@@ -21,17 +21,7 @@ defmodule Dragonfly.PooTest do
   end
 
   setup config do
-    runner_opts =
-      config
-      |> Map.fetch!(:runner)
-      |> Keyword.merge(
-        terminator: [
-          name: __MODULE__.TestTerminator,
-          shutdown_timeout: 10_000,
-          failsafe_timeout: 10_000
-        ]
-      )
-
+    runner_opts = Map.fetch!(config, :runner)
     dyn_sup = Module.concat(config.test, "DynamicSup")
     pool_pid = start_supervised!({Pool, Keyword.merge(runner_opts, name: config.test)})
 
@@ -69,7 +59,6 @@ defmodule Dragonfly.PooTest do
 
   @tag runner: [min: 1, max: 2, max_concurrency: 2, idle_shutdown_after: 500]
   test "idle shutdown", %{dyn_sup: dyn_sup} = config do
-    Process.monitor(term)
     sim_long_running(config.test, 100)
     sim_long_running(config.test, 100)
     sim_long_running(config.test, 100)

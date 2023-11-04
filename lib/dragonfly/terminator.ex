@@ -44,7 +44,7 @@ defmodule Dragonfly.Terminator do
 
     * `:name` – The optional name of the GenServer. Defaults to `__MODULE__`.
 
-    * `:backend` – The optional Gragonfly backend module, defaults to configured backend.
+    * `:backend` – The optional Dragonfly backend module, defaults to configured backend.
 
     * `:shutdown_timeout` - The time to wait for existing RPC calls to finish
       before shutting down the system. Defaults to 20 seconds.
@@ -55,7 +55,7 @@ defmodule Dragonfly.Terminator do
     * `:log` - The optional logging level. Defaults `false`.
   """
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: opts[:name] || __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end
 
   def deadline_me(terminator, timeout, single_use?) when is_boolean(single_use?) do
@@ -69,8 +69,8 @@ defmodule Dragonfly.Terminator do
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
-    timeout = Keyword.fetch!(opts, :shutdown_timeout)
-    failsafe_timeout = Keyword.fetch!(opts, :failsafe_timeout)
+    timeout = Keyword.get(opts, :shutdown_timeout, 20_000)
+    failsafe_timeout = Keyword.get(opts, :failsafe_timeout, 20_000)
     log = Keyword.get(opts, :log, false)
 
     {parent, backend} =
@@ -154,6 +154,7 @@ defmodule Dragonfly.Terminator do
   end
 
   def handle_info(:idle_shutdown, state) do
+    IO.inspect({:idle, self()})
     if state.idle_shutdown_check.() do
       system_stop(state, "idle shutdown")
       {:stop, {:shutdown, :idle}, state}

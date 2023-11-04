@@ -5,16 +5,10 @@ defmodule Dragonfly.Application do
 
   @impl true
   def start(_type, _args) do
-    terminator_defaults = [
-      shutdown_timeout: 20_000,
-      failsafe_timeout: 20_000
-    ]
-
-    terminator_opts =
-      Keyword.merge(terminator_defaults, Application.get_env(:dragonfly, :terminator) || [])
+    terminator_opts = Application.get_env(:dragonfly, :terminator) || []
 
     children = [
-      {Dragonfly.Terminator, terminator_opts}
+      # {Dragonfly.Terminator, terminator_opts}
     ]
 
     opts = [strategy: :one_for_one, name: Dragonfly.Supervisor]
