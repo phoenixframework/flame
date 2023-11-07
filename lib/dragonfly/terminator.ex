@@ -82,6 +82,7 @@ defmodule Dragonfly.Terminator do
 
     case opts[:parent] || Dragonfly.Parent.get() do
       nil ->
+        if log, do: Logger.log(log, "no parent found, :ignore")
         :ignore
 
       %Dragonfly.Parent{} = parent ->
@@ -96,6 +97,7 @@ defmodule Dragonfly.Terminator do
           log: log,
           failsafe_timer: failsafe_timer
         }
+        log(state, "starting with parent #{inspect(parent)}")
 
         {:ok, state, {:continue, :connect}}
     end
@@ -125,7 +127,7 @@ defmodule Dragonfly.Terminator do
   def handle_info({:DOWN, ref, :process, pid, reason}, %Terminator{} = state) do
     if state.parent && state.parent.pid == pid do
       new_state = system_stop(state, "parent pid #{inspect(pid)} went away #{inspect(reason)}. Going down")
-      {:stop, {:shutdown, :noconnection}, new_state}
+      {:noreply, new_state}
     else
       {:noreply, drop_caller(state, ref)}
     end
@@ -142,7 +144,7 @@ defmodule Dragonfly.Terminator do
   def handle_info({:nodedown, who}, %Terminator{parent: parent} = state) do
     if who === node(parent.pid) do
       new_state = system_stop(state, "nodedown #{inspect(who)}")
-      {:stop, {:shutdown, :noconnection}, new_state}
+      {:noreply, new_state}
     else
       {:noreply, state}
     end
@@ -150,13 +152,14 @@ defmodule Dragonfly.Terminator do
 
   def handle_info(:failsafe_shutdown, %Terminator{} = state) do
     new_state = system_stop(state, "failsafe connect timeout")
-    {:stop, {:shutdown, :noconnection}, new_state}
+    {:noreply, new_state}
   end
 
-  def handle_info(:idle_shutdown, state) do
+  def handle_info(:idle_shutdown, %Terminator{parent: parent} = state) do
     if state.idle_shutdown_check.() do
+      send(parent.pid, {parent.ref, :remote_shutdown, :idle})
       new_state = system_stop(state, "idle shutdown")
-      {:stop, {:shutdown, :idle}, new_state}
+      {:noreply, new_state}
     else
       {:noreply, schedule_idle_shutdown(state)}
     end

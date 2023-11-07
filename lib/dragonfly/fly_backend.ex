@@ -157,11 +157,6 @@ defmodule Dragonfly.FlyBackend do
   end
 
   @impl true
-  # TODO maybe remove this
-  def handle_info({_parent_ref, :remote_up, _}, state) do
-    {:noreply, state}
-  end
-
   def handle_info({:nodedown, down_node}, state) do
     if down_node == state.runner_node_name do
       {:stop, {:shutdown, :noconnection}, state}

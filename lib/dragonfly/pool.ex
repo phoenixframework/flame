@@ -79,7 +79,7 @@ defmodule Dragonfly.Pool do
   """
   def call(name, func, opts \\ []) do
     {{ref, runner_pid}, opts} =
-      with_elapsed_timeout(opts, fn -> GenServer.call(name, :checkout, opts[:timeout] || 5000) end)
+      with_elapsed_timeout(opts, fn -> GenServer.call(name, :checkout, opts[:timeout] || 15000) end)
 
     result = Runner.call(runner_pid, func, opts[:timeout])
     :ok = GenServer.call(name, {:checkin, ref})

@@ -135,7 +135,8 @@ defmodule Dragonfly.Runner do
         state = %{
           runner: runner,
           checkouts: %{},
-          backend_state: backend_state
+          backend_state: backend_state,
+          otp_app: if(otp_app = System.get_env("RELEASE_NAME"), do: String.to_atom(otp_app))
         }
 
         {:ok, state}
@@ -168,6 +169,10 @@ defmodule Dragonfly.Runner do
             {:noreply, maybe_backend_handle_info(state, msg)}
         end
     end
+  end
+
+  def handle_info({_ref, :remote_shutdown, reason}, state) do
+    {:stop, {:shutdown, reason}, state}
   end
 
   def handle_info(msg, state) do
@@ -229,7 +234,7 @@ defmodule Dragonfly.Runner do
   end
 
   def handle_call({:remote_boot, _timeout}, _from, state) do
-    %{runner: runner, backend_state: backend_state} = state
+    %{runner: runner, backend_state: backend_state, otp_app: otp_app} = state
 
     case runner.status do
       :booted ->
@@ -251,6 +256,8 @@ defmodule Dragonfly.Runner do
 
               :ok =
                 remote_call!(runner, new_backend_state, runner.connect_timeout, fn ->
+                  # ensure app is fully started if parent connects before up
+                  if otp_app, do: {:ok, _} = Application.ensure_all_started(otp_app)
                   :ok = Dragonfly.Terminator.schedule_idle_shutdown(term, idle_after, idle_check)
                 end)
 
