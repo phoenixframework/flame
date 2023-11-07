@@ -105,12 +105,21 @@ defmodule Dragonfly.Pool do
   def init(opts) do
     terminator_sup = Keyword.fetch!(opts, :terminator_sup)
     runner_opts = runner_opts(opts, terminator_sup)
+    min = Keyword.fetch!(opts, :min)
+
+    # we must avoid recursively booting remote runners if we are a child
+    min =
+      if Dragonfly.Parent.get() do
+        0
+      else
+        min
+      end
 
     state = %Pool{
       dynamic_sup: Keyword.fetch!(opts, :dynamic_sup),
       terminator_sup: terminator_sup,
       name: Keyword.fetch!(opts, :name),
-      min: Keyword.fetch!(opts, :min),
+      min: min,
       max: Keyword.fetch!(opts, :max),
       boot_timeout: Keyword.get(opts, :connect_timeout, @boot_timeout),
       idle_shutdown_after: Keyword.get(opts, :idle_shutdown_after, @idle_shutdown_after),
