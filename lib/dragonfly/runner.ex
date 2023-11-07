@@ -3,7 +3,7 @@ defmodule Dragonfly.Runner do
   use GenServer
   require Logger
 
-  alias Dragonfly.{Runner, Backend}
+  alias Dragonfly.Runner
 
   @derive {Inspect,
            only: [
@@ -303,17 +303,12 @@ defmodule Dragonfly.Runner do
       }
 
     {backend, backend_init} =
-      case Keyword.fetch(opts, :backend) do
-        {:ok, backend} when is_atom(backend) ->
+      case Keyword.fetch!(opts, :backend) do
+        backend when is_atom(backend) ->
           opts = Application.get_env(:dragonfly, backend) || []
           {backend, backend.init(opts)}
 
-        {:ok, {backend, opts}} when is_atom(backend) and is_list(opts) ->
-          {backend, backend.init(opts)}
-
-        :error ->
-          backend = Backend.impl()
-          opts = Application.get_env(:dragonfly, backend) || []
+        {backend, opts} when is_atom(backend) and is_list(opts) ->
           {backend, backend.init(opts)}
       end
 

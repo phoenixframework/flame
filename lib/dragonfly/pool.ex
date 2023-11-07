@@ -103,32 +103,53 @@ defmodule Dragonfly.Pool do
 
   @impl true
   def init(opts) do
+    terminator_sup = Keyword.fetch!(opts, :terminator_sup)
+    runner_opts = runner_opts(opts, terminator_sup)
+
     state = %Pool{
       dynamic_sup: Keyword.fetch!(opts, :dynamic_sup),
-      terminator_sup: Keyword.fetch!(opts, :terminator_sup),
+      terminator_sup: terminator_sup,
       name: Keyword.fetch!(opts, :name),
       min: Keyword.fetch!(opts, :min),
       max: Keyword.fetch!(opts, :max),
       boot_timeout: Keyword.get(opts, :connect_timeout, @boot_timeout),
       idle_shutdown_after: Keyword.get(opts, :idle_shutdown_after, @idle_shutdown_after),
       max_concurrency: Keyword.get(opts, :max_concurrency, @default_max_concurrency),
-      runner_opts:
-        Keyword.take(
-          opts,
-          [
-            :backend,
-            :log,
-            :single_use,
-            :terminator_sup,
-            :timeout,
-            :connect_timeout,
-            :shutdown_timeout,
-            :idle_shutdown_after,
-          ]
-        )
+      runner_opts: runner_opts
     }
 
     {:ok, boot_runners(state)}
+  end
+
+  defp runner_opts(opts, terminator_sup) do
+    defaults = [terminator_sup: terminator_sup, log: Keyword.get(opts, :log, false)]
+
+    runner_opts =
+      Keyword.take(
+        opts,
+        [
+          :backend,
+          :log,
+          :single_use,
+          :timeout,
+          :connect_timeout,
+          :shutdown_timeout,
+          :idle_shutdown_after
+        ]
+      )
+
+    case Keyword.fetch(opts, :backend) do
+      {:ok, {backend, opts}} ->
+        Keyword.update!(runner_opts, :backend, {backend, Keyword.merge(opts, defaults)})
+
+      {:ok, backend} ->
+        Keyword.update!(runner_opts, :backend, {backend, defaults})
+
+      :error ->
+        backend = Dragonfly.Backend.impl()
+        backend_opts = Application.get_env(:dragonfly, backend) || []
+        Keyword.put(runner_opts, :backend, {backend, Keyword.merge(backend_opts, defaults)})
+    end
   end
 
   @impl true
