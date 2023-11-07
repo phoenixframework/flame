@@ -128,8 +128,6 @@ defmodule Dragonfly do
   """
   require Logger
 
-  alias Dragonfly.Runner
-
   @doc """
   Calls a function in a remote runner.
 
@@ -165,21 +163,7 @@ defmodule Dragonfly do
     Dragonfly.Pool.call(pool, func, opts)
   end
 
-  def call(func) when is_function(func, 0) do
-    call(func, [])
-  end
-
   def call(pool, func) when is_atom(pool) and is_function(func, 0) do
     Dragonfly.Pool.call(pool, func, [])
-  end
-
-  def call(func, opts) when is_function(func, 0) and is_list(opts) do
-    {:ok, pid} = Runner.start_link(opts)
-    :ok = Runner.remote_boot(pid)
-    call(pid, func)
-  end
-
-  def call(pid, func) when is_pid(pid) and is_function(func, 0) do
-    Runner.call(pid, func)
   end
 end

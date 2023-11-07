@@ -4,7 +4,7 @@ defmodule Dragonfly.Runner.MixProject do
   def project do
     [
       app: :dragonfly,
-      version: "0.1.1",
+      version: "0.1.2",
       elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
