@@ -8,7 +8,7 @@ defmodule Dragonfly.Application do
     terminator_opts = Application.get_env(:dragonfly, :terminator) || []
 
     children = [
-      # {Dragonfly.Terminator, terminator_opts}
+      {Dragonfly.Terminator, terminator_opts}
     ]
 
     opts = [strategy: :one_for_one, name: Dragonfly.Supervisor]

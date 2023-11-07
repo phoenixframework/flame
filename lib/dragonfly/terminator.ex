@@ -27,9 +27,9 @@ defmodule Dragonfly.Terminator do
   defstruct shutdown_timeout: nil,
             parent: nil,
             parent_monitor_ref: nil,
-            backend: nil,
             calls: %{},
             log: false,
+            status: nil,
             failsafe_timer: nil,
             connect_timer: nil,
             connect_attempts: 0,
@@ -42,9 +42,10 @@ defmodule Dragonfly.Terminator do
 
   ## Options
 
-    * `:name` – The optional name of the GenServer. Defaults to `__MODULE__`.
+    * `:name` – The optional name of the GenServer.
 
-    * `:backend` – The optional Dragonfly backend module, defaults to configured backend.
+    * `:parent` – The `%Dragonfly.Parent{}` of the parent runner.
+      Defaults to lookup from `Dragonfly.Parent.get/0`.
 
     * `:shutdown_timeout` - The time to wait for existing RPC calls to finish
       before shutting down the system. Defaults to 20 seconds.
@@ -55,7 +56,9 @@ defmodule Dragonfly.Terminator do
     * `:log` - The optional logging level. Defaults `false`.
   """
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
+    Keyword.validate!(opts, [:name, :parent, :shutdown_timeout, :failsafe_timeout, :log])
+
+    GenServer.start_link(__MODULE__, opts, name: opts[:name])
   end
 
   def deadline_me(terminator, timeout, single_use?) when is_boolean(single_use?) do
@@ -66,6 +69,10 @@ defmodule Dragonfly.Terminator do
     GenServer.call(terminator, {:schedule_idle_shutdown, idle_shutdown, idle_check})
   end
 
+  def system_shutdown(terminator) when is_pid(terminator) do
+    GenServer.call(terminator, :system_shutdown)
+  end
+
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
@@ -73,31 +80,24 @@ defmodule Dragonfly.Terminator do
     failsafe_timeout = Keyword.get(opts, :failsafe_timeout, 20_000)
     log = Keyword.get(opts, :log, false)
 
-    {parent, backend} =
-      case Dragonfly.Parent.get() do
-        nil -> {nil, opts[:backend] || Dragonfly.Backend.impl()}
-        %Dragonfly.Parent{} = parent -> {parent, parent.backend}
-      end
+    case opts[:parent] || Dragonfly.Parent.get() do
+      nil ->
+        :ignore
 
-    failsafe_timer =
-      if parent do
+      %Dragonfly.Parent{} = parent ->
         :global_group.monitor_nodes(true)
-        Process.send_after(self(), :failsafe_shutdown, failsafe_timeout)
-      end
+        failsafe_timer = Process.send_after(self(), :failsafe_shutdown, failsafe_timeout)
 
-    state = %Terminator{
-      shutdown_timeout: timeout,
-      parent: parent,
-      backend: backend,
-      calls: %{},
-      log: log,
-      failsafe_timer: failsafe_timer
-    }
+        state = %Terminator{
+          status: :connecting,
+          shutdown_timeout: timeout,
+          parent: parent,
+          calls: %{},
+          log: log,
+          failsafe_timer: failsafe_timer
+        }
 
-    if parent do
-      {:ok, state, {:continue, :connect}}
-    else
-      {:ok, state}
+        {:ok, state, {:continue, :connect}}
     end
   end
 
@@ -122,10 +122,10 @@ defmodule Dragonfly.Terminator do
     {:noreply, drop_caller(state, ref)}
   end
 
-  def handle_info({:DOWN, ref, :process, pid, _reason}, %Terminator{} = state) do
+  def handle_info({:DOWN, ref, :process, pid, reason}, %Terminator{} = state) do
     if state.parent && state.parent.pid == pid do
-      system_stop(state, "parent pid #{inspect(pid)} went away. Going down")
-      {:stop, {:shutdown, :noconnection}, state}
+      new_state = system_stop(state, "parent pid #{inspect(pid)} went away #{inspect(reason)}. Going down")
+      {:stop, {:shutdown, :noconnection}, new_state}
     else
       {:noreply, drop_caller(state, ref)}
     end
@@ -141,29 +141,32 @@ defmodule Dragonfly.Terminator do
 
   def handle_info({:nodedown, who}, %Terminator{parent: parent} = state) do
     if who === node(parent.pid) do
-      system_stop(state, "nodedown #{inspect(who)}")
-      {:stop, {:shutdown, :noconnection}, state}
+      new_state = system_stop(state, "nodedown #{inspect(who)}")
+      {:stop, {:shutdown, :noconnection}, new_state}
     else
       {:noreply, state}
     end
   end
 
   def handle_info(:failsafe_shutdown, %Terminator{} = state) do
-    system_stop(state, "failsafe connect timeout")
-    {:stop, {:shutdown, :noconnection}, state}
+    new_state = system_stop(state, "failsafe connect timeout")
+    {:stop, {:shutdown, :noconnection}, new_state}
   end
 
   def handle_info(:idle_shutdown, state) do
-    IO.inspect({:idle, self()})
     if state.idle_shutdown_check.() do
-      system_stop(state, "idle shutdown")
-      {:stop, {:shutdown, :idle}, state}
+      new_state = system_stop(state, "idle shutdown")
+      {:stop, {:shutdown, :idle}, new_state}
     else
       {:noreply, schedule_idle_shutdown(state)}
     end
   end
 
   @impl true
+  def handle_call(:system_shutdown, _form, %Terminator{} = state) do
+    {:reply, :ok, system_stop(state, "system shutdown instructed from parent #{inspect(state.parent.pid)}")}
+  end
+
   def handle_call({:deadline, timeout, single_use?}, {from_pid, _tag}, %Terminator{} = state) do
     {:reply, :ok, deadline_caller(state, from_pid, timeout, single_use?)}
   end
@@ -209,9 +212,15 @@ defmodule Dragonfly.Terminator do
 
   defp drop_caller(%Terminator{} = state, ref) when is_reference(ref) do
     %{^ref => %Caller{} = caller} = state.calls
-    new_state = %Terminator{state | calls: Map.delete(state.calls, ref)}
+    Process.cancel_timer(caller.timer)
+    state = %Terminator{state | calls: Map.delete(state.calls, ref)}
 
-    if caller.single_use?, do: state.backend.system_shutdown()
+    new_state =
+      if caller.single_use? do
+        system_stop(state, "single use completed. Going down")
+      else
+        state
+      end
 
     if map_size(new_state.calls) == 0 do
       schedule_idle_shutdown(new_state)
@@ -252,7 +261,8 @@ defmodule Dragonfly.Terminator do
 
       %Terminator{
         state
-        | parent_monitor_ref: ref,
+        | status: :connected,
+          parent_monitor_ref: ref,
           failsafe_timer: nil,
           connect_timer: nil,
           connect_attempts: new_attempts
@@ -266,9 +276,12 @@ defmodule Dragonfly.Terminator do
     end
   end
 
-  defp system_stop(%Terminator{} = state, log) do
+  defp system_stop(%Terminator{parent: parent} = state, log) do
     log(state, "#{inspect(__MODULE__)}.system_stop: #{log}")
-    state.backend.system_shutdown()
+    if state.status != :stopping do
+      parent.backend.system_shutdown()
+    end
+    %Terminator{state | status: :stopping}
   end
 
   defp log(%Terminator{log: level}, message) do

@@ -3,26 +3,17 @@ defmodule Dragonfly.LocalBackend do
   @behaviour Dragonfly.Backend
 
   @impl true
-  def init(%Dragonfly.Runner{} = runner, opts) do
+  def init(opts) do
     defaults =
       Application.get_env(:dragonfly, __MODULE__) || []
+
+    _terminator_sup = Keyword.fetch!(opts, :terminator_sup)
 
     {:ok,
      defaults
      |> Keyword.merge(opts)
-     |> Enum.into(%{})
-     |> Map.merge(%{terminator_pid: nil, log: runner.log})}
+     |> Enum.into(%{})}
   end
-
-  @impl true
-  def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
-    case state.terminator_ref do
-      ^ref -> {:stop, {:shutdown, reason}, state}
-      _ref -> {:noreply, state}
-    end
-  end
-
-  def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
   def remote_spawn_monitor(_state, term) do
@@ -46,8 +37,18 @@ defmodule Dragonfly.LocalBackend do
 
   @impl true
   def remote_boot(state) do
-    {:ok, terminator_pid} = Dragonfly.Terminator.start_link(name: nil, log: state.log)
-    IO.inspect({:started, terminator_pid})
-    {:ok, terminator_pid, %{state | terminator_pid: terminator_pid}}
+    parent = Dragonfly.Parent.new(make_ref(), self(), __MODULE__)
+    opts = [parent: parent, log: state.log]
+
+    spec = %{
+      id: Dragonfly.Terminator,
+      start: {Dragonfly.Terminator, :start_link, [opts]},
+      restart: :temporary,
+      type: :worker
+    }
+
+    {:ok, terminator_pid} = DynamicSupervisor.start_child(state.terminator_sup, spec)
+
+    {:ok, terminator_pid, state}
   end
 end

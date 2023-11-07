@@ -51,7 +51,7 @@ defmodule Dragonfly.Runner do
   end
 
   def shutdown(runner, timeout \\ nil) when is_pid(runner) do
-    GenServer.call(runner, {:shutdown, timeout})
+    GenServer.call(runner, {:runner_shutdown, timeout})
   end
 
   @doc """
@@ -83,9 +83,20 @@ defmodule Dragonfly.Runner do
         func.()
       end)
 
-    :ok = checkin(runner_pid, ref)
+    case result do
+      {:ok, value} ->
+        :ok = checkin(runner_pid, ref)
+        value
 
-    result
+      {kind, reason} ->
+        :ok = checkin(runner_pid, ref)
+
+        case kind do
+          :exit -> exit(reason)
+          :error -> raise(reason)
+          :throw -> throw(reason)
+        end
+    end
   end
 
   @doc """
@@ -148,7 +159,7 @@ defmodule Dragonfly.Runner do
             new_state = drop_checkout(state, ref)
 
             if runner.single_use do
-              {:stop, {:shutdown, reason}, new_state}
+              {:stop, reason, new_state}
             else
               {:noreply, new_state}
             end
@@ -181,18 +192,19 @@ defmodule Dragonfly.Runner do
   end
 
   @impl true
-  def handle_call({:shutdown, timeout}, _from, state) do
+  def handle_call({:runner_shutdown, timeout}, _from, state) do
     %{runner: runner} = state
     timeout = timeout || runner.shutdown_timeout
     ref = make_ref()
     parent = self()
+    %Runner{terminator: terminator} = runner
 
     state = drain_checkouts(state, timeout)
 
     {:ok, {remote_pid, remote_monitor_ref}} =
       runner.backend.remote_spawn_monitor(state.backend_state, fn ->
+        :ok = Dragonfly.Terminator.system_shutdown(terminator)
         send(parent, {ref, :ok})
-        runner.backend.system_shutdown()
       end)
 
     receive do
@@ -226,8 +238,7 @@ defmodule Dragonfly.Runner do
       :awaiting_boot ->
         time(runner, "runner connect", fn ->
           case runner.backend.remote_boot(backend_state) do
-            {:ok, remote_terminator_pid, new_backend_state} ->
-              IO.inspect({:monitor, remote_terminator_pid})
+            {:ok, remote_terminator_pid, new_backend_state} when is_pid(remote_terminator_pid) ->
               Process.monitor(remote_terminator_pid)
               new_runner = %Runner{runner | terminator: remote_terminator_pid, status: :booted}
               new_state = %{state | runner: new_runner, backend_state: new_backend_state}
@@ -239,7 +250,7 @@ defmodule Dragonfly.Runner do
               } = new_runner
 
               :ok =
-                remote_call(runner, new_backend_state, runner.connect_timeout, fn ->
+                remote_call!(runner, new_backend_state, runner.connect_timeout, fn ->
                   :ok = Dragonfly.Terminator.schedule_idle_shutdown(term, idle_after, idle_check)
                 end)
 
@@ -250,14 +261,14 @@ defmodule Dragonfly.Runner do
 
             other ->
               raise ArgumentError,
-                    "expected #{inspect(runner.backend)}.remote_boot/1 to return {:ok, new_state} | {:error, reason}, got: #{inspect(other)}"
+                    "expected #{inspect(runner.backend)}.remote_boot/1 to return {:ok, remote_terminator_pid, new_state} | {:error, reason}, got: #{inspect(other)}"
           end
         end)
     end
   end
 
   @doc false
-  def new(opts \\ []) do
+  def new(opts) when is_list(opts) do
     opts =
       Keyword.validate!(opts, [
         :backend,
@@ -266,7 +277,7 @@ defmodule Dragonfly.Runner do
         :timeout,
         :connect_timeout,
         :shutdown_timeout,
-        :idle_shutdown_after,
+        :idle_shutdown_after
       ])
 
     {idle_shutdown_after_ms, idle_check} =
@@ -295,15 +306,15 @@ defmodule Dragonfly.Runner do
       case Keyword.fetch(opts, :backend) do
         {:ok, backend} when is_atom(backend) ->
           opts = Application.get_env(:dragonfly, backend) || []
-          {backend, backend.init(runner, opts)}
+          {backend, backend.init(opts)}
 
         {:ok, {backend, opts}} when is_atom(backend) and is_list(opts) ->
-          {backend, backend.init(runner, opts)}
+          {backend, backend.init(opts)}
 
         :error ->
           backend = Backend.impl()
           opts = Application.get_env(:dragonfly, backend) || []
-          {backend, backend.init(runner, opts)}
+          {backend, backend.init(opts)}
       end
 
     %Runner{runner | backend: backend, backend_init: backend_init}
@@ -329,6 +340,15 @@ defmodule Dragonfly.Runner do
     %{state | checkouts: Map.delete(state.checkouts, ref)}
   end
 
+  defp remote_call!(%Runner{} = runner, backend_state, timeout, func) do
+    case remote_call(runner, backend_state, timeout, func) do
+      {:ok, value} -> value
+      {:exit, reason} -> exit(reason)
+      {:error, error} -> raise(error)
+      {:throw, val} -> throw(val)
+    end
+  end
+
   defp remote_call(%Runner{} = runner, backend_state, timeout, func) do
     parent_ref = make_ref()
     parent = self()
@@ -342,18 +362,19 @@ defmodule Dragonfly.Runner do
     receive do
       {^parent_ref, result} ->
         Process.demonitor(remote_monitor_ref, [:flush])
-        result
+        {:ok, result}
 
       {:DOWN, ^remote_monitor_ref, :process, ^remote_pid, reason} ->
         case reason do
-          :killed -> exit(:timeout)
-          other -> exit(other)
+          :killed -> {:exit, :timeout}
+          other -> {:exit, other}
         end
 
       {:EXIT, ^remote_pid, reason} ->
-        exit(reason)
+        {:exit, reason}
     after
-      timeout -> exit(:timeout)
+      timeout ->
+        {:exit, :timeout}
     end
   end
 

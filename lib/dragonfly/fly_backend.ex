@@ -35,7 +35,7 @@ defmodule Dragonfly.FlyBackend do
             runner_node_name: nil
 
   @impl true
-  def init(%Dragonfly.Runner{}, opts) do
+  def init(opts) do
     :global_group.monitor_nodes(true)
     conf = Enum.into(Application.get_env(:dragonfly, __MODULE__) || [], %{})
     [node_base | _] = node() |> to_string() |> String.split("@")

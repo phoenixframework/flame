@@ -10,13 +10,10 @@ defmodule Dragonfly.RunnerTest do
   setup :verify_on_exit!
 
   setup do
-    term =
-      start_supervised!(
-        {Dragonfly.Terminator,
-         name: __MODULE__.TestTerminator, shutdown_timeout: 1000, failsafe_timeout: 1000}
-      )
+    term_sup =
+      start_supervised!({DynamicSupervisor, name: __MODULE__.TermSup, strategy: :one_for_one})
 
-    {:ok, term: term}
+    {:ok, term_sup: term_sup}
   end
 
   @post_success %{
@@ -25,24 +22,37 @@ defmodule Dragonfly.RunnerTest do
     "private_ip" => node() |> to_string() |> String.split("@") |> Enum.at(-1)
   }
 
+  defp remote_boot(state) do
+    parent = Dragonfly.Parent.new(make_ref(), self(), MockBackend)
+
+    spec = %{
+      id: Dragonfly.Terminator,
+      start: {Dragonfly.Terminator, :start_link, [[parent: parent]]},
+      restart: :temporary,
+      type: :worker
+    }
+
+    {:ok, terminator_pid} = DynamicSupervisor.start_child(__MODULE__.TermSup, spec)
+
+    {:ok, terminator_pid, state}
+  end
+
   def mock_successful_runner(executions, runner_opts \\ []) do
     test_pid = self()
 
     MockBackend
-    |> expect(:init, fn %Runner{}, _opts -> {:ok, :state} end)
-    |> expect(:remote_boot, fn :state -> {:ok, @post_success} end)
+    |> expect(:init, fn _opts -> {:ok, :state} end)
+    |> expect(:remote_boot, fn :state -> remote_boot(@post_success) end)
+    |> expect(:handle_info, fn {_ref, :remote_up, _pid}, state -> {:noreply, state} end)
     |> expect(:remote_spawn_monitor, executions, fn @post_success = _state, func ->
       {:ok, spawn_monitor(func)}
     end)
     # we need to send and assert_receive to avoid the race of going down before mox verify
-    |> stub(:system_shutdown, fn -> send(test_pid, :stopped) end)
+    |> expect(:system_shutdown, fn -> send(test_pid, :stopped) end)
 
     Runner.start_link(
       Keyword.merge(
-        [
-          terminator: __MODULE__.TestTerminator,
-          backend: {MockBackend, image: "my-imag", app_name: "test", api_token: "secret"}
-        ],
+        [backend: {MockBackend, image: "my-imag", app_name: "test", api_token: "secret"}],
         runner_opts
       )
     )
@@ -78,18 +88,17 @@ defmodule Dragonfly.RunnerTest do
     test_pid = self()
 
     MockBackend
-    |> expect(:init, fn %Runner{}, _opts -> {:ok, :state} end)
-    |> expect(:remote_boot, fn :state -> {:ok, @post_success} end)
+    |> expect(:init, fn _opts -> {:ok, :state} end)
+    |> expect(:remote_boot, fn :state -> remote_boot(@post_success) end)
+    |> expect(:handle_info, fn {_ref, :remote_up, _pid}, state -> {:noreply, state} end)
     |> expect(:remote_spawn_monitor, 2, fn @post_success = _state, func ->
       {:ok, spawn_monitor(func)}
     end)
-    # we need to send and assert_receive to avoid the race of going down before mox verify
     |> expect(:system_shutdown, fn -> send(test_pid, :stopped) end)
 
     {:ok, runner} =
       Runner.start_link(
         single_use: true,
-        terminator: __MODULE__.TestTerminator,
         backend: {MockBackend, image: "my-imag", app_name: "test", api_token: "secret"}
       )
 
@@ -114,7 +123,7 @@ defmodule Dragonfly.RunnerTest do
 
   test "backend runner spawn connect failure" do
     MockBackend
-    |> expect(:init, fn %Runner{}, _opts -> {:ok, :state} end)
+    |> expect(:init, fn _opts -> {:ok, :state} end)
     |> expect(:remote_boot, fn :state -> {:error, :invalid_authentication} end)
 
     {:ok, runner} =
@@ -128,7 +137,7 @@ defmodule Dragonfly.RunnerTest do
 
   test "backend runner boot failure" do
     MockBackend
-    |> expect(:init, fn %Runner{}, _opts -> {:ok, :state} end)
+    |> expect(:init, fn _opts -> {:ok, :state} end)
     |> expect(:remote_boot, fn :state -> {:error, :nxdomain} end)
 
     {:ok, runner} =
@@ -142,15 +151,16 @@ defmodule Dragonfly.RunnerTest do
 
   describe "execution failure" do
     test "single use" do
-      {:ok, runner} = mock_successful_runner(2, single_use: true)
+      {:ok, runner} = mock_successful_runner(3, single_use: true)
       assert Runner.remote_boot(runner) == :ok
       error = wrap_exit(runner, fn -> Runner.call(runner, fn -> raise "boom" end) end)
       assert {:exit, {%RuntimeError{message: "boom"}, _}} = error
       assert_receive :stopped
+      assert Runner.shutdown(runner) == :ok
     end
 
     test "multi use" do
-      {:ok, runner} = mock_successful_runner(3)
+      {:ok, runner} = mock_successful_runner(4)
       Process.monitor(runner)
       assert Runner.remote_boot(runner) == :ok
 
@@ -159,13 +169,14 @@ defmodule Dragonfly.RunnerTest do
       refute_receive :stopped
       refute_receive {:DOWN, _ref, :process, ^runner, _}
       assert Runner.call(runner, fn -> :works end) == :works
+      assert Runner.shutdown(runner) == :ok
     end
   end
 
   describe "execution timeout" do
     test "single use" do
       timeout = 100
-      {:ok, runner} = mock_successful_runner(2, timeout: timeout, single_use: true)
+      {:ok, runner} = mock_successful_runner(3, timeout: timeout, single_use: true)
 
       Process.monitor(runner)
       assert Runner.remote_boot(runner) == :ok
@@ -177,11 +188,12 @@ defmodule Dragonfly.RunnerTest do
 
       assert_receive :stopped
       assert_receive {:DOWN, _ref, :process, _, :killed}
+      assert Runner.shutdown(runner) == :ok
     end
 
     test "multi use" do
       timeout = 100
-      {:ok, runner} = mock_successful_runner(3, timeout: timeout)
+      {:ok, runner} = mock_successful_runner(4, timeout: timeout)
 
       Process.monitor(runner)
       assert Runner.remote_boot(runner) == :ok
@@ -193,7 +205,8 @@ defmodule Dragonfly.RunnerTest do
 
       refute_receive :stopped
       refute_receive {:DOWN, _ref, :process, ^runner, _}
-      assert Runner.call(runner, fn -> :works end) == :works
+      assert Runner.call(runner, fn -> :works end, 1234) == :works
+      assert Runner.shutdown(runner) == :ok
     end
   end
 
@@ -202,16 +215,20 @@ defmodule Dragonfly.RunnerTest do
       timeout = 500
       {:ok, runner} = mock_successful_runner(1, idle_shutdown_after: timeout)
 
+      Process.unlink(runner)
       Process.monitor(runner)
       assert Runner.remote_boot(runner) == :ok
 
       assert_receive :stopped, timeout * 2
+      assert_receive {:DOWN, _ref, :process, ^runner, _}
 
       {:ok, runner} = mock_successful_runner(2, idle_shutdown_after: timeout)
+      Process.unlink(runner)
       Process.monitor(runner)
       assert Runner.remote_boot(runner) == :ok
       assert Runner.call(runner, fn -> :works end) == :works
       assert_receive :stopped, timeout * 2
+      assert_receive {:DOWN, _ref, :process, ^runner, _}
     end
 
     test "with timed check" do
@@ -220,12 +237,14 @@ defmodule Dragonfly.RunnerTest do
       idle_after = {timeout, fn -> Agent.get(agent, & &1) end}
       {:ok, runner} = mock_successful_runner(1, idle_shutdown_after: idle_after)
 
+      Process.unlink(runner)
       Process.monitor(runner)
       assert Runner.remote_boot(runner) == :ok
 
       refute_receive {:DOWN, _ref, :process, ^runner, _}, timeout * 2
       Agent.update(agent, fn _ -> true end)
       assert_receive :stopped, timeout * 2
+      assert_receive {:DOWN, _ref, :process, ^runner, _}
     end
   end
 end
