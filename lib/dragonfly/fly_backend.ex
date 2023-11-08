@@ -32,6 +32,7 @@ defmodule Dragonfly.FlyBackend do
              :image,
              :app,
              :runner_id,
+             :local_ip,
              :remote_terminator_pid,
              :runner_node_basename,
              :runner_instance_id,
@@ -40,6 +41,7 @@ defmodule Dragonfly.FlyBackend do
              :boot_timeout
            ]}
   defstruct host: nil,
+            local_ip: nil,
             env: %{},
             size: nil,
             image: nil,
@@ -94,8 +96,10 @@ defmodule Dragonfly.FlyBackend do
         state.env
       )
 
+    [_, ip] = node() |> Atom.to_string() |> String.split("@")
+
     new_state =
-      %FlyBackend{state | env: new_env, parent_ref: parent_ref}
+      %FlyBackend{state | env: new_env, parent_ref: parent_ref, local_ip: ip}
 
     {:ok, new_state}
   end
@@ -136,6 +140,7 @@ defmodule Dragonfly.FlyBackend do
           connect_options: [timeout: state.boot_timeout],
           retry: false,
           auth: {:bearer, state.token},
+          headers: %{"dragonfly-parent-ip" => "#{state.local_ip}"},
           json: %{
             name: "#{state.app}-dragonfly-#{rand_id(20)}",
             config: %{
