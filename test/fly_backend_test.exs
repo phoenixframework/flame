@@ -3,6 +3,10 @@ defmodule Dragonfly.FlyBackendTest do
 
   alias Dragonfly.{Runner, FlyBackend}
 
+  def new({backend, opts}) do
+    Runner.new(backend: {backend, Keyword.merge([terminator_sup: __MODULE__], opts)})
+  end
+
   setup do
     Application.delete_env(:dragonfly, :backend)
     Application.delete_env(:dragonfly, FlyBackend)
@@ -10,22 +14,22 @@ defmodule Dragonfly.FlyBackendTest do
 
   test "explicit backend" do
     assert_raise ArgumentError, ~r/missing :token/, fn ->
-      Runner.new(backend: {FlyBackend, []})
+      new({FlyBackend, []})
     end
 
     assert_raise ArgumentError, ~r/missing :image/, fn ->
-      Runner.new(backend: {FlyBackend, token: "123"})
+      new({FlyBackend, token: "123"})
     end
 
     assert_raise ArgumentError, ~r/missing :app/, fn ->
-      Runner.new(backend: {FlyBackend, token: "123", image: "img"})
+      new({FlyBackend, token: "123", image: "img"})
     end
 
     assert_raise ArgumentError, ~r/missing :app/, fn ->
-      Runner.new(backend: {FlyBackend, token: "123", image: "img"})
+      new({FlyBackend, token: "123", image: "img"})
     end
 
-    assert Runner.new(backend: {FlyBackend, token: "123", image: "img", app: "app"})
+    assert new({FlyBackend, token: "123", image: "img", app: "app"})
   end
 
   test "extended opts" do
@@ -38,7 +42,7 @@ defmodule Dragonfly.FlyBackendTest do
       size: "performance-1x"
     ]
 
-    runner = Runner.new(backend: {FlyBackend, opts})
+    runner = new({FlyBackend, opts})
     assert {:ok, init} = runner.backend_init
     assert init.host == "foo.local"
     assert init.size == "performance-1x"
@@ -52,26 +56,23 @@ defmodule Dragonfly.FlyBackendTest do
 
   test "global configured backend" do
     assert_raise ArgumentError, ~r/missing :token/, fn ->
-      Application.put_env(:dragonfly, :backend, Dragonfly.FlyBackend)
       Application.put_env(:dragonfly, Dragonfly.FlyBackend, [])
-      Runner.new()
+      Runner.new([backend: Dragonfly.FlyBackend])
     end
 
     assert_raise ArgumentError, ~r/missing :image/, fn ->
-      Application.put_env(:dragonfly, :backend, Dragonfly.FlyBackend)
       Application.put_env(:dragonfly, Dragonfly.FlyBackend, token: "123")
-      Runner.new()
+      Runner.new([backend: Dragonfly.FlyBackend])
     end
 
     assert_raise ArgumentError, ~r/missing :app/, fn ->
-      Application.put_env(:dragonfly, :backend, Dragonfly.FlyBackend)
       Application.put_env(:dragonfly, Dragonfly.FlyBackend, token: "123", image: "img")
-      Runner.new()
+      Runner.new([backend: Dragonfly.FlyBackend])
     end
 
     Application.put_env(:dragonfly, :backend, Dragonfly.FlyBackend)
     Application.put_env(:dragonfly, Dragonfly.FlyBackend, token: "123", image: "img", app: "app")
 
-    assert Runner.new()
+    assert Runner.new([backend: Dragonfly.FlyBackend])
   end
 end

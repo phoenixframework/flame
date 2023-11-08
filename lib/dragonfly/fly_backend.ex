@@ -1,17 +1,29 @@
 defmodule Dragonfly.FlyBackend do
+  @moduledoc """
+  The `Dragonfly.Backend` using [Fly.io](https://fly.io) machines.
+
+  The only required configuration is telling Dragonly to use the
+  `Dragonfly.FlyBackend` by default and the `:token` which is your Fly.io API
+  token. These can be set via application configuration in your `config/runtime.exs`
+  withing a `:prod` block:
+
+      if config_env() == :prod do
+        config :dragonfly, :backend, Dragonfly.FlyBackend
+        config :dragonfly, Dragonfly.FlyBackend, token: System.fetch_env!("FLY_API_TOKEN")
+        ...
+      end
+
+  To set your `FLY_API_TOKEN` secret, you can run the following commands locally:
+
+  ```bash
+  $ fly secrets set FLY_API_TOKEN="$(fly auth token)"
+  ```
+  """
   @behaviour Dragonfly.Backend
 
   alias Dragonfly.FlyBackend
 
   require Logger
-
-  def child_spec(opts) do
-    %{
-      id: __MODULE__,
-      start: {Dragonfly.FlyBackend.Supervisor, :start_link, [opts]},
-      type: :supervisor
-    }
-  end
 
   @derive {Inspect,
            only: [
@@ -20,22 +32,24 @@ defmodule Dragonfly.FlyBackend do
              :image,
              :app,
              :runner_id,
-             :machine_pid,
+             :local_ip,
+             :remote_terminator_pid,
              :runner_node_basename,
              :runner_instance_id,
              :runner_private_ip,
              :runner_node_name,
-             :connect_timeout
+             :boot_timeout
            ]}
   defstruct host: nil,
+            local_ip: nil,
             env: %{},
             size: nil,
             image: nil,
             app: nil,
             token: nil,
-            connect_timeout: nil,
+            boot_timeout: nil,
             runner_id: nil,
-            machine_pid: nil,
+            remote_terminator_pid: nil,
             parent_ref: nil,
             runner_node_basename: nil,
             runner_instance_id: nil,
@@ -54,7 +68,7 @@ defmodule Dragonfly.FlyBackend do
       token: System.get_env("FLY_API_TOKEN"),
       host: "https://api.machines.dev",
       size: "performance-2x",
-      connect_timeout: 30_000,
+      boot_timeout: 30_000,
       runner_node_basename: node_base
     }
 
@@ -70,7 +84,11 @@ defmodule Dragonfly.FlyBackend do
     end
 
     parent_ref = make_ref()
-    encoded_parent = encode_term({parent_ref, self()})
+
+    encoded_parent =
+      parent_ref
+      |> Dragonfly.Parent.new(self(), __MODULE__)
+      |> Dragonfly.Parent.encode()
 
     new_env =
       Map.merge(
@@ -78,22 +96,25 @@ defmodule Dragonfly.FlyBackend do
         state.env
       )
 
+    [_, ip] = node() |> Atom.to_string() |> String.split("@")
+
     new_state =
-      %FlyBackend{state | env: new_env, parent_ref: parent_ref}
+      %FlyBackend{state | env: new_env, parent_ref: parent_ref, local_ip: ip}
 
     {:ok, new_state}
   end
 
   @impl true
-  def remote_spawn_link(%FlyBackend{} = state, term) do
+  # TODO explore spawn_request
+  def remote_spawn_monitor(%FlyBackend{} = state, term) do
     case term do
       func when is_function(func, 0) ->
-        pid = Node.spawn_link(state.runner_node_name, func)
-        {:ok, pid, state}
+        {pid, ref} = Node.spawn_monitor(state.runner_node_name, func)
+        {:ok, {pid, ref}}
 
       {mod, fun, args} when is_atom(mod) and is_atom(fun) and is_list(args) ->
-        pid = Node.spawn_link(state.runner_node_name, mod, fun, args)
-        {:ok, pid, state}
+        {pid, ref} = Node.spawn_monitor(state.runner_node_name, mod, fun, args)
+        {:ok, {pid, ref}}
 
       other ->
         raise ArgumentError,
@@ -106,7 +127,7 @@ defmodule Dragonfly.FlyBackend do
     System.stop()
   end
 
-  defp with_elapsed_ms(func) when is_function(func, 0) do
+  def with_elapsed_ms(func) when is_function(func, 0) do
     {micro, result} = :timer.tc(func)
     {result, div(micro, 1000)}
   end
@@ -116,9 +137,10 @@ defmodule Dragonfly.FlyBackend do
     {req, req_connect_time} =
       with_elapsed_ms(fn ->
         Req.post!("#{state.host}/v1/apps/#{state.app}/machines",
-          connect_options: [timeout: state.connect_timeout],
+          connect_options: [timeout: state.boot_timeout],
           retry: false,
           auth: {:bearer, state.token},
+          headers: %{"dragonfly-parent-ip" => "#{state.local_ip}"},
           json: %{
             name: "#{state.app}-dragonfly-#{rand_id(20)}",
             config: %{
@@ -132,7 +154,7 @@ defmodule Dragonfly.FlyBackend do
         )
       end)
 
-    remaining_connect_window = state.connect_timeout - req_connect_time
+    remaining_connect_window = state.boot_timeout - req_connect_time
 
     case req.body do
       %{"id" => id, "instance_id" => instance_id, "private_ip" => ip} ->
@@ -145,17 +167,18 @@ defmodule Dragonfly.FlyBackend do
               runner_node_name: :"#{state.runner_node_basename}@#{ip}"
           }
 
-        machine_pid =
+        remote_terminator_pid =
           receive do
-            {^parent_ref, :up, machine_pid} ->
-              machine_pid
+            {^parent_ref, :remote_up, remote_terminator_pid} ->
+              remote_terminator_pid
           after
             remaining_connect_window ->
-              Logger.error("failed to connect to fly machine within #{state.connect_timeout}ms")
+              Logger.error("failed to connect to fly machine within #{state.boot_timeout}ms")
               exit(:timeout)
           end
 
-        {:ok, %{new_state | machine_pid: machine_pid}}
+        new_state = %FlyBackend{new_state | remote_terminator_pid: remote_terminator_pid}
+        {:ok, remote_terminator_pid, new_state}
 
       other ->
         {:error, other}
@@ -163,11 +186,6 @@ defmodule Dragonfly.FlyBackend do
   end
 
   @impl true
-  # TODO maybe remove this
-  def handle_info({_parent_ref, :up, _}, state) do
-    {:noreply, state}
-  end
-
   def handle_info({:nodedown, down_node}, state) do
     if down_node == state.runner_node_name do
       {:stop, {:shutdown, :noconnection}, state}
@@ -178,16 +196,11 @@ defmodule Dragonfly.FlyBackend do
 
   def handle_info({:nodeup, _}, state), do: {:noreply, state}
 
-  def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
-    ^pid = state.machine_pid
-    {:stop, {:shutdown, reason}, state}
+  def handle_info(_msg, state) do
+    {:noreply, state}
   end
 
   defp rand_id(len) do
     len |> :crypto.strong_rand_bytes() |> Base.encode64(padding: false) |> binary_part(0, len)
-  end
-
-  defp encode_term(term) do
-    term |> :erlang.term_to_binary() |> Base.encode64()
   end
 end

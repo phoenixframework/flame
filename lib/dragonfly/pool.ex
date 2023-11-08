@@ -3,7 +3,7 @@ defmodule Dragonfly.Pool.RunnerState do
 end
 
 defmodule Dragonfly.Pool.WaitingState do
-  defstruct from: nil, func: nil, opts: nil, monitor_ref: nil
+  defstruct from: nil, monitor_ref: nil
 end
 
 defmodule Dragonfly.Pool do
@@ -19,22 +19,20 @@ defmodule Dragonfly.Pool do
         {Dragonfly.Pool, name: MyRunner, min: 1, max: 10, max_concurrency: 100}
       ]
 
-  # TODO spin down after inactive_shutdown
+  See `start_link/1` for supported options.
   """
   use GenServer
 
   alias Dragonfly.{Pool, Runner}
   alias Dragonfly.Pool.{RunnerState, WaitingState}
 
-  @default_timeout 20_000
   @default_max_concurrency 100
-  @boot_timeout 20_000
-  @idle_shutdown_after 20_000
-  @ok_async_call :ok_async_call
+  @boot_timeout 30_000
+  @idle_shutdown_after 30_000
 
   defstruct name: nil,
             dynamic_sup: nil,
-            task_sup: nil,
+            terminator_sup: nil,
             boot_timeout: nil,
             idle_shutdown_after: nil,
             min: nil,
@@ -54,13 +52,48 @@ defmodule Dragonfly.Pool do
   end
 
   @doc """
-  TODO
+  Starts a pool of runners.
+
+  ## Options
+
+    * `:name` - The name of the pool, for example: `MyApp.FFMPegRunner`
+
+    * `:min` - The minimum number of runners to keep in the pool at all times.
+      For "scale to zero" behavior you may pass `0`. When starting as a dragonfly child,
+      the `:min` will be forced to zero to avoid recursively starting backend resources.
+
+    * `:max` - The maximum number of runners to elastically grow to in the pool.
+
+    * `:max_concurrency` - The maximum number of concurrent executions per runner before
+      booting new runners or queueing calls. Defaults to `100`.
+
+    * `:single_use` - if `true`, runners will be terminated after each call completes.
+      Defaults `false`.
+
+    * `:backend` - The backend to use. Defaults to the configured `:dragonfly, :backend` or
+      `Dragonfly.LocalBackend` if not configured.
+
+    * `:log` - The log level to use for verbose logging. Defaults to `false`.
+
+    * `:timeout` - The time to allow functions to execute on a remote node. Defaults to 30 seconds.
+      This value is also used as the default `Dragonfly.call/3` timeout for the caller.
+    * `:boot_timeout` - The time to allow for booting and connecting to a remote node.
+      Defaults to 30 seconds.
+
+    * `:shutdown_timeout` - The time to allow for graceful shutdown on the remote node.
+      Defaults to 30 seconds.
+
+    * `:idle_shutdown_after` - The amount of time and function check to idle a remote node
+      down after a period of inactivity. Defaults to 30 seconds. A tuple may also be passed
+      to check a spefici condition, for example:
+
+          {10_000, fn -> Supervisor.which_children(MySup) == []}
   """
   def start_link(opts) do
     Keyword.validate!(opts, [
       :name,
       :dynamic_sup,
-      :task_sup,
+      :terminator_sup,
       :idle_shutdown_after,
       :min,
       :max,
@@ -69,7 +102,7 @@ defmodule Dragonfly.Pool do
       :log,
       :single_use,
       :timeout,
-      :connect_timeout,
+      :boot_timeout,
       :shutdown_timeout
     ])
 
@@ -80,82 +113,110 @@ defmodule Dragonfly.Pool do
   TODO
   """
   def call(name, func, opts \\ []) do
-    case GenServer.call(name, {:call, func, opts}, opts[:timeout] || @default_timeout) do
-      {:ok, res} -> res
-      {:exit, reason} -> exit(reason)
-    end
+    opts = Keyword.put_new_lazy(opts, :timeout, fn -> lookup_boot_timeout(name) end)
+    {{ref, runner_pid}, opts} =
+      with_elapsed_timeout(opts, fn -> GenServer.call(name, :checkout, opts[:timeout]) end)
+
+    result = Runner.call(runner_pid, func, opts[:timeout])
+    :ok = GenServer.call(name, {:checkin, ref})
+    result
+  end
+
+  defp with_elapsed_timeout(opts, func) do
+    {micro, result} = :timer.tc(func)
+    elapsed_ms = div(micro, 1000)
+
+    opts =
+      case Keyword.fetch(opts, :timeout) do
+        {:ok, :infinity} -> opts
+        {:ok, ms} when is_integer(ms) -> Keyword.put(opts, :timeout, ms - elapsed_ms)
+        {:ok, nil} -> opts
+        :error -> opts
+      end
+
+    {result, opts}
+  end
+
+  defp lookup_boot_timeout(name) do
+    :ets.lookup_element(name, :boot_timeout, 2)
   end
 
   @impl true
   def init(opts) do
+    name = Keyword.fetch!(opts, :name)
+    boot_timeout = Keyword.get(opts, :boot_timeout, @boot_timeout)
+    :ets.new(name, [:set, :public, :named_table, read_concurrency: true])
+    :ets.insert(name, {:boot_timeout, boot_timeout})
+    terminator_sup = Keyword.fetch!(opts, :terminator_sup)
+    runner_opts = runner_opts(opts, terminator_sup)
+    min = Keyword.fetch!(opts, :min)
+
+    # we must avoid recursively booting remote runners if we are a child
+    min =
+      if Dragonfly.Parent.get() do
+        0
+      else
+        min
+      end
+
     state = %Pool{
       dynamic_sup: Keyword.fetch!(opts, :dynamic_sup),
-      task_sup: Keyword.fetch!(opts, :task_sup),
-      name: Keyword.fetch!(opts, :name),
-      min: Keyword.fetch!(opts, :min),
+      terminator_sup: terminator_sup,
+      name: name,
+      min: min,
       max: Keyword.fetch!(opts, :max),
-      boot_timeout: Keyword.get(opts, :connect_timeout, @boot_timeout),
+      boot_timeout: boot_timeout,
       idle_shutdown_after: Keyword.get(opts, :idle_shutdown_after, @idle_shutdown_after),
       max_concurrency: Keyword.get(opts, :max_concurrency, @default_max_concurrency),
-      runner_opts:
-        Keyword.take(
-          opts,
-          [
-            :backend,
-            :log,
-            :single_use,
-            :timeout,
-            :connect_timeout,
-            :shutdown_timeout,
-            :idle_shutdown_after,
-            :task_sup
-          ]
-        )
+      runner_opts: runner_opts
     }
 
     {:ok, boot_runners(state)}
   end
 
-  @impl true
-  def handle_info({task_ref, @ok_async_call}, state) do
-    state =
-      case state.callers do
-        # we already replied to caller on success inside task
-        %{^task_ref => {_from, runner_ref}} ->
-          Process.demonitor(task_ref, [:flush])
-          new_state = %Pool{state | callers: Map.delete(state.callers, task_ref)}
+  defp runner_opts(opts, terminator_sup) do
+    defaults = [terminator_sup: terminator_sup, log: Keyword.get(opts, :log, false)]
 
-          new_state
-          |> dec_runner_count(runner_ref)
-          |> flush_downs()
-          |> call_next_waiting_caller()
+    runner_opts =
+      Keyword.take(
+        opts,
+        [
+          :backend,
+          :log,
+          :single_use,
+          :timeout,
+          :boot_timeout,
+          :shutdown_timeout,
+          :idle_shutdown_after
+        ]
+      )
 
-        %{} ->
-          state
-      end
+    case Keyword.fetch(opts, :backend) do
+      {:ok, {backend, opts}} ->
+        Keyword.update!(runner_opts, :backend, {backend, Keyword.merge(opts, defaults)})
 
-    {:noreply, state}
-  end
+      {:ok, backend} ->
+        Keyword.update!(runner_opts, :backend, {backend, defaults})
 
-  @impl true
-  def handle_info({:DOWN, _ref, :process, _pid, _reason} = msg, %Pool{} = state) do
-    callers_before = state.callers
-
-    new_state =
-      state
-      |> handle_down(msg)
-      |> flush_downs()
-
-    if callers_before != new_state.callers do
-      {:noreply, call_next_waiting_caller(new_state)}
-    else
-      {:noreply, new_state}
+      :error ->
+        backend = Dragonfly.Backend.impl()
+        backend_opts = Application.get_env(:dragonfly, backend) || []
+        Keyword.put(runner_opts, :backend, {backend, Keyword.merge(backend_opts, defaults)})
     end
   end
 
   @impl true
-  def handle_call({:call, func, opts}, from, state) do
-    {:noreply, call_runner(state, from, func, opts)}
+  def handle_info({:DOWN, _ref, :process, _pid, _reason} = msg, %Pool{} = state) do
+    {:noreply, handle_down(state, msg)}
+  end
+
+  @impl true
+  def handle_call(:checkout, from, state) do
+    {:noreply, checkout_runner(state, from)}
+  end
+
+  def handle_call({:checkin, ref}, _from, state) do
+    {:reply, :ok, checkin_runner(state, ref)}
   end
 
   defp min_runner(state) do
@@ -167,7 +228,14 @@ defmodule Dragonfly.Pool do
     end
   end
 
-  defp call_runner(%Pool{} = state, from, func, opts) do
+  defp checkin_runner(state, ref) do
+    %{^ref => {_from, runner_ref}} = state.callers
+    Process.demonitor(ref, [:flush])
+
+    drop_caller(state, ref, runner_ref)
+  end
+
+  defp checkout_runner(%Pool{} = state, from, monitor_ref \\ nil) do
     min_runner = min_runner(state)
     runner_count = map_size(state.runners)
 
@@ -177,7 +245,7 @@ defmodule Dragonfly.Pool do
           {:ok, %RunnerState{} = runner} ->
             state
             |> put_runner(runner)
-            |> async_runner_call(runner, from, func, opts)
+            |> reply_runner_checkout(runner, from, monitor_ref)
 
           {:error, reason} ->
             GenServer.reply(from, {:error, reason})
@@ -185,30 +253,31 @@ defmodule Dragonfly.Pool do
         end
 
       min_runner && min_runner.count < state.max_concurrency ->
-        async_runner_call(state, min_runner, from, func, opts)
+        reply_runner_checkout(state, min_runner, from, monitor_ref)
 
       true ->
-        waiting_in(state, from, func, opts)
+        waiting_in(state, from)
     end
   end
 
-  defp async_runner_call(state, %RunnerState{monitor_ref: runner_ref} = runner, from, func, opts)
-       when is_function(func, 0) do
-    task =
-      Task.Supervisor.async_nolink(state.task_sup, fn ->
-        result = Runner.call(runner.pid, func, opts[:timeout])
-        # reply directly to caller here to avoid copying
-        GenServer.reply(from, {:ok, result})
-        @ok_async_call
-      end)
+  defp reply_runner_checkout(state, %RunnerState{} = runner, from, monitor_ref) do
+    # we pass monitor_ref down from waiting so we don't need to remonitor if already monitoring
+    ref =
+      if monitor_ref do
+        monitor_ref
+      else
+        {from_pid, _tag} = from
+        Process.monitor(from_pid)
+      end
 
-    new_state = %Pool{state | callers: Map.put(state.callers, task.ref, {from, runner_ref})}
-    inc_runner_count(new_state, runner_ref)
+    GenServer.reply(from, {ref, runner.pid})
+    new_state = %Pool{state | callers: Map.put(state.callers, ref, {from, runner.monitor_ref})}
+    inc_runner_count(new_state, runner.monitor_ref)
   end
 
-  defp waiting_in(%Pool{} = state, {pid, _tag} = from, func, opts) when is_function(func, 0) do
+  defp waiting_in(%Pool{} = state, {pid, _tag} = from) do
     ref = Process.monitor(pid)
-    waiting = %WaitingState{from: from, func: func, opts: opts, monitor_ref: ref}
+    waiting = %WaitingState{from: from, monitor_ref: ref}
     %Pool{state | waiting: state.waiting ++ [waiting]}
   end
 
@@ -281,24 +350,29 @@ defmodule Dragonfly.Pool do
     %Pool{state | runners: Map.delete(state.runners, ref)}
   end
 
-  defp notify_caller(%Pool{} = state, task_ref, runner_ref, from, reply) do
-    GenServer.reply(from, reply)
-    new_state = %Pool{state | callers: Map.delete(state.callers, task_ref)}
-    dec_runner_count(new_state, runner_ref)
+  defp drop_caller(%Pool{} = state, caller_ref, runner_ref) do
+    new_state = %Pool{state | callers: Map.delete(state.callers, caller_ref)}
+
+    new_state
+    |> dec_runner_count(runner_ref)
+    |> call_next_waiting_caller()
   end
 
   defp call_next_waiting_caller(%Pool{} = state) do
-    case state.waiting do
+    # we flush DOWN's so we don't send a lease to a waiting caller that is already down
+    new_state = flush_downs(state)
+
+    case new_state.waiting do
       [] ->
-        state
+        new_state
 
       [%WaitingState{} = first | rest] ->
-        Process.demonitor(first.monitor_ref, [:flush])
-        call_runner(%Pool{state | waiting: rest}, first.from, first.func, first.opts)
+        # checkout_runner will borrow already running monitor
+        checkout_runner(%Pool{new_state | waiting: rest}, first.from, first.monitor_ref)
     end
   end
 
-  defp handle_down(%Pool{} = state, {:DOWN, ref, :process, _pid, reason}) do
+  defp handle_down(%Pool{} = state, {:DOWN, ref, :process, _pid, _reason}) do
     new_waiting =
       Enum.filter(state.waiting, fn %WaitingState{} = waiting ->
         waiting.monitor_ref != ref
@@ -308,8 +382,8 @@ defmodule Dragonfly.Pool do
 
     state =
       case state.callers do
-        %{^ref => {from, runner_ref}} ->
-          notify_caller(state, ref, runner_ref, from, {:exit, reason})
+        %{^ref => {_from, runner_ref}} ->
+          drop_caller(state, ref, runner_ref)
 
         %{} ->
           state

@@ -27,7 +27,7 @@ defmodule Dragonfly do
   and executed on a remote node:
 
       def resize_video_quality(%Video{} = video) do
-        Dragonfly.call(fn ->
+        Dragonfly.call(MyApp.FFMpegRunner, fn ->
           path = "#{vid.id}_720p.mp4"
           System.cmd("ffmpeg", ~w(-i #{vid.url} -s 720x480 -c:a copy #{path}))
           VideoStore.put_file!("videos/#{path}", path)
@@ -42,6 +42,67 @@ defmodule Dragonfly do
   your entire application, including the database Repo. As soon as the function is done
   executing, the ephemeral node is terminated. This means you can elastically scale
   your app as load increases, and only pay for the resources you need at the time.
+
+  To support your Dragonfly calls, you'll need to add a named `Dragonfly.Pool` to your
+  application's supervision tree, which we'll discuss next.
+
+  ## Pools
+
+  A `Dragonfly.Pool` provides elastic runner scaling, allowing a minimum and
+  maximum number of runners to be configured, and idle'd down as load decreases.
+
+  Pools give you elastic scale that maximizes the newly spawned hardware.
+  At the same time, you also want to avoid spawning unbound resources. You also
+  want to keep spawned nodes alive for a period of time to avoid the overhead
+  of booting new ones before idleing them down. The following pool configuration
+  takes care of all of this for you:
+
+      children = [
+        ...,
+        {Dragonfly.Pool,
+         name: App.FFMpegRunner,
+         min: 0,
+         max: 10,
+         max_concurrency: 5,
+         idle_shutdown_after: :timer.minutes(5)},
+      ]
+
+  Here we add a `Dragonfly.Pool` to our application supervision tree, configuring
+  a minimum of 0 and maximum of 10 runners. This acheives "scale to zero" behavior
+  while also allowing the pool to scale up to 10 runners when load increases.
+  Each runner in the case will be able to execute up to 5 concurrent functions.
+  The runners will shutdown atter 5 minutes of inactivity.
+
+  Calling a pool is as simple as passing its name to the Dragonfly functions:
+
+      Dragonfly.call(App.FFMpegRunner, fn -> :operation1 end)
+
+  You'll also often want to enable or disable other application services based on whether
+  your application is being started as child Dragonfly runner or being run directly. You
+  can use `Dragonfly.Parent.get/0` to conditionally enable or disable processes in your
+  `applicaiton.ex` file:
+
+      def start(_type, _args) do
+        dragonfly_parent = Dragonfly.Parent.get()
+
+        children = [
+          ...,
+          {Dragonfly.Pool,
+           name: Thumbs.FFMpegRunner,
+           min: 0,
+           max: 10,
+           max_concurrency: 5,
+           idle_shutdown_after: :timer.minutes(5)},
+        !dragonfly_parent && ThumbsWeb.Endpoint
+        ]
+        |> Enum.filter(& &1)
+
+        opts = [strategy: :one_for_one, name: Thumbs.Supervisor]
+        Supervisor.start_link(children, opts)
+      end
+
+  Here we filter the phoenix endpoint from being started when running as a Dragonfly
+  child because we have no need to handle web requests in this case.
 
   ## Backends
 
@@ -64,93 +125,23 @@ defmodule Dragonfly do
         config :dragonfly, Dragonfly.FlyBackend, token: System.fetch_env!("FLY_API_TOKEN")
         ...
       end
-
-  And then started in your supervision tree:
-
-      children = [
-        ...,
-        Dragonfly.FlyBackend,
-      ]
-
-  ## Runners
-
-  In practice, users will utilize the `Dragonfly.call/3` and `Dragonfly.cast/3` functions
-  to accomplish most of their work. These functions are backed by a `Dragonfly.Runner`,
-  a lower-level primitive for executing functions on remote nodes.
-
-  A `Dragonfly.Runner` is responsible for booting a new node, and executing concurrent
-  functions on it. For example:
-
-      {:ok, runner} = Runner.start_link(backend: Dragonfly.FlyBackend)
-      :ok = Runner.remote_boot(runner)
-      Runner.call(runner, fn -> :operation1 end)
-      Runner.cast(runner, fn -> :operation2 end)
-      Runner.shutdown(runner)
-
-  When a caller exits or crashes, the remote node will automatically be terminated.
-  For distributed erlang backends, like `Dragonfly.FlyBackend`, this will be
-  accomplished by the backend making use of  `Dragonfly.Backend.ParentMonitor`,
-  but other methods are possible.
-
-  ## Pools
-
-  Most workflows don't necessary need an entire node dedicated to a single function
-  execution. `Dragonfly.Pool` provides a higher-level abstraction that manages a
-  pool of runners. It provides elastic runner scaling, allowing a minimum and
-  maximum number of runners to be configured, and idle'd down as load decreases.
-
-  Pools give you elastic scale that maximizes the newly spawned hardware.
-  At the same time, you also want to avoid spawning unbound resources. You also
-  want to keep spawned nodes alive for a period of time to avoid the overhead
-  of booting new ones before idleing them down. The following pool configuration
-  takes care of all of this for you:
-
-      children = [
-        ...,
-        Dragonfly.FlyBackend,
-        {Dragonfly.Pool,
-         name: App.FFMpegRunner,
-         min: 0,
-         max: 10,
-         max_concurrency: 5,
-         idle_shutdown_after: 60_000,
-      ]
-
-  Here we add a `Dragonfly.Pool` to our application supervision tree, configuring
-  a minimum of 0 and maximum of 10 runners. This acheives "scale to zero" behavior
-  while also allowing the pool to scale up to 10 runners when load increases.
-  Each runner in the case will be able to execute up to 5 concurrent functions.
-  The runners will shutdown atter 60s of inactivity.
-
-  Calling a pool is as simple as passing its name to the Dragonfly functions:
-
-      Dragonfly.call(App.FFMpegRunner, fn -> :operation1 end)
   """
   require Logger
 
-  alias Dragonfly.Runner
-
   @doc """
-  Calls a function in a remote runner.
-
-  If no runner is provided, a new one is linked to the caller and
-  remotely booted.
+  Calls a function in a remote runner for the given `Dragonfly.Pool`.
 
   ## Options
 
-    * `:single_use` - if `true`, the runner will be terminated after the call. Defaults `false`.
-    * `:backend` - The backend to use. Defaults to `Dragonfly.LocalBackend`.
-    * `:log` - The log level to use for verbose logging. Defaults to `false`.
-    * `:single_use` -
-    * `:timeout` -
-    * `:connect_timeout` -
-    * `:shutdown_timeout` -
-    * `:task_su` -
+    * `:timeout` - The timeout the caller is willing to wait for a response before an
+      exit with `:timeout`. Defaults to the configured timeout of the pool.
+      The executed function will also be terminated on the remote dragonfly if
+      the timeout is reached.
 
   ## Examples
 
     def my_expensive_thing(arg) do
-      Dragonfly.call(, fn ->
+      Dragonfly.call(MyApp.Runner, fn ->
         # i'm now doing expensive work inside a new node
         # pubsub and repo access all just work
         Phoenix.PubSub.broadcast(MyApp.PubSub, "topic", result)
@@ -165,21 +156,7 @@ defmodule Dragonfly do
     Dragonfly.Pool.call(pool, func, opts)
   end
 
-  def call(func) when is_function(func, 0) do
-    call(func, [])
-  end
-
   def call(pool, func) when is_atom(pool) and is_function(func, 0) do
     Dragonfly.Pool.call(pool, func, [])
-  end
-
-  def call(func, opts) when is_function(func, 0) and is_list(opts) do
-    {:ok, pid} = Runner.start_link(opts)
-    :ok = Runner.remote_boot(pid)
-    call(pid, func)
-  end
-
-  def call(pid, func) when is_pid(pid) and is_function(func, 0) do
-    Runner.call(pid, func)
   end
 end

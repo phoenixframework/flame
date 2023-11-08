@@ -1,4 +1,4 @@
-defmodule Dragonfly.PooTest do
+defmodule Dragonfly.PoolTest do
   use ExUnit.Case, async: true
 
   alias Dragonfly.Pool
@@ -71,8 +71,8 @@ defmodule Dragonfly.PooTest do
 
     Process.monitor(runner1)
     Process.monitor(runner2)
-    assert_receive {:DOWN, _ref, :process, ^runner2, :normal}, 1000
-    refute_receive {:DOWN, _ref, :process, ^runner1, :normal}
+    assert_receive {:DOWN, _ref, :process, ^runner2, {:shutdown, :idle}}, 1000
+    refute_receive {:DOWN, _ref, :process, ^runner1, {:shutdown, :idle}}
 
     assert [{:undefined, ^runner1, :worker, [Dragonfly.Runner]}] =
              Supervisor.which_children(dyn_sup)

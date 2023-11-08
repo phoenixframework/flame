@@ -1,40 +1,62 @@
 defmodule Dragonfly.Runner do
   @moduledoc false
+  # ## Runners
+
+  # In practice, users will utilize the `Dragonfly.call/3` and `Dragonfly.cast/3` functions
+  # to accomplish their work. These functions are backed by a `Dragonfly.Pool` of
+  # `Dragonfly.Runner`'s
+  #
+  # A `Dragonfly.Runner` is responsible for booting a new node, and executing concurrent
+  # functions on it. For example:
+  #
+  #     {:ok, runner} = Runner.start_link(backend: Dragonfly.FlyBackend)
+  #     :ok = Runner.remote_boot(runner)
+  #     Runner.call(runner, fn -> :operation1 end)
+  #     Runner.cast(runner, fn -> :operation2 end)
+  #     Runner.shutdown(runner)
+  #
+  # When a caller exits or crashes, the remote node will automatically be terminated.
+  # For distributed erlang backends, like `Dragonfly.FlyBackend`, this will be
+  # accomplished automatically by the `Dragonfly.Terminator`, but other methods
+  # are possible.
+
   use GenServer
   require Logger
 
-  alias Dragonfly.{Runner, Backend}
+  alias Dragonfly.Runner
 
   @derive {Inspect,
            only: [
              :id,
              :backend,
+             :terminator,
              :instance_id,
              :private_ip,
              :node_name,
              :single_use,
-             :task_sup,
              :timeout,
              :status,
              :log,
-             :connect_timeout,
-             :idle_shutdown_after
+             :boot_timeout,
+             :idle_shutdown_after,
+             :idle_shutdown_check
            ]}
 
   defstruct id: nil,
             instance_id: nil,
             private_ip: nil,
             backend: nil,
+            terminator: nil,
             backend_init: nil,
             node_name: nil,
             single_use: false,
-            task_sup: nil,
             timeout: 20_000,
             status: nil,
             log: :info,
-            connect_timeout: 10_000,
+            boot_timeout: 10_000,
             shutdown_timeout: 5_000,
-            idle_shutdown_after: nil
+            idle_shutdown_after: nil,
+            idle_shutdown_check: nil
 
   @doc """
   TODO
@@ -49,7 +71,7 @@ defmodule Dragonfly.Runner do
   end
 
   def shutdown(runner, timeout \\ nil) when is_pid(runner) do
-    GenServer.call(runner, {:shutdown, timeout})
+    GenServer.call(runner, {:runner_shutdown, timeout})
   end
 
   @doc """
@@ -70,24 +92,29 @@ defmodule Dragonfly.Runner do
   @doc """
   TODO
   """
-  def call(pid, func, timeout \\ nil) when is_pid(pid) and is_function(func, 0) do
-    ref = make_ref()
+  def call(runner_pid, func, timeout \\ nil) when is_pid(runner_pid) and is_function(func, 0) do
+    {ref, %Runner{} = runner, backend_state} = checkout(runner_pid)
+    %Runner{terminator: terminator, single_use: single?} = runner
+    call_timeout = timeout || runner.timeout
 
-    case GenServer.call(pid, {:remote_call, ref, func, timeout}, timeout || :infinity) do
-      {^ref, :ok} ->
-        # as soon as we get the :ok from runner, we await the remote result which
-        # will be in our mailbox
-        receive do
-          {^ref, :ok, result} -> result
-        after
-          0 -> exit(:timeout)
-        end
+    result =
+      remote_call(runner, backend_state, call_timeout, fn ->
+        :ok = Dragonfly.Terminator.deadline_me(terminator, call_timeout, single?)
+        func.()
+      end)
 
-      {^ref, :fail, {kind, reason}} ->
-        case {kind, reason} do
-          {:throw, reason} -> throw(reason)
-          {:error, {reason, stack}} -> reraise(reason, stack)
-          {:exit, reason} -> exit(reason)
+    case result do
+      {:ok, value} ->
+        :ok = checkin(runner_pid, ref)
+        value
+
+      {kind, reason} ->
+        :ok = checkin(runner_pid, ref)
+
+        case kind do
+          :exit -> exit(reason)
+          :error -> raise(reason)
+          :throw -> throw(reason)
         end
     end
   end
@@ -95,8 +122,28 @@ defmodule Dragonfly.Runner do
   @doc """
   TODO
   """
-  def cast(pid, func) when is_pid(pid) and is_function(func, 0) do
-    GenServer.cast(pid, {:remote_cast, func})
+  def cast(runner_pid, func) when is_pid(runner_pid) and is_function(func, 0) do
+    {ref, runner, backend_state} = checkout(runner_pid)
+
+    %Runner{single_use: single_use, backend: backend, timeout: timeout, terminator: terminator} =
+      runner
+
+    {:ok, {_remote_pid, _remote_monitor_ref}} =
+      backend.remote_spawn_monitor(backend_state, fn ->
+        # This runs on the remote node
+        :ok = Dragonfly.Terminator.deadline_me(terminator, timeout, single_use)
+        func.()
+      end)
+
+    :ok = checkin(runner_pid, ref)
+  end
+
+  defp checkout(runner_pid) do
+    GenServer.call(runner_pid, :checkout)
+  end
+
+  defp checkin(runner_pid, ref) do
+    GenServer.call(runner_pid, {:checkin, ref})
   end
 
   @impl true
@@ -107,10 +154,9 @@ defmodule Dragonfly.Runner do
       {:ok, backend_state} ->
         state = %{
           runner: runner,
-          waiting: %{},
-          spawns: %{},
+          checkouts: %{},
           backend_state: backend_state,
-          idle_timer: nil
+          otp_app: if(otp_app = System.get_env("RELEASE_NAME"), do: String.to_atom(otp_app))
         }
 
         {:ok, state}
@@ -121,55 +167,32 @@ defmodule Dragonfly.Runner do
   end
 
   @impl true
-  def handle_info(:idle_shutdown, state) do
-    # TODO – decide if we should break links here or not?
-    {:stop, :normal, state}
-  end
+  def handle_info({:DOWN, ref, :process, pid, reason} = msg, state) do
+    %{runner: %Runner{} = runner} = state
 
-  def handle_info({:remote_ok, ref}, state) do
-    %{^ref => from} = state.waiting
-    GenServer.reply(from, {ref, :ok})
-    {:noreply, drop_waiting(state, ref)}
-  end
+    case runner do
+      %Runner{terminator: ^pid} ->
+        {:stop, reason, state}
 
-  def handle_info({:remote_fail, ref, reason}, state) do
-    debug(state, "remote_fail: #{inspect(reason)}")
-    %{^ref => from} = state.waiting
-    GenServer.reply(from, {ref, :fail, reason})
-    {:noreply, drop_waiting(state, ref)}
-  end
+      %Runner{terminator: _} ->
+        case state.checkouts do
+          %{^ref => _from_pid} ->
+            new_state = drop_checkout(state, ref)
 
-  def handle_info({:DOWN, _monitor_ref, :process, pid, reason} = msg, state) do
-    %Runner{} = runner = state.runner
-
-    case state.spawns do
-      %{^pid => ref} ->
-        # if we still have waiting, something went wrong, tell caller and cleanup
-        case state.waiting do
-          %{^ref => _} -> maybe_reply_waiting(state, ref, {ref, :fail, {:exit, reason}})
-          %{} -> :noop
-        end
-
-        new_state =
-          state
-          |> drop_waiting(ref)
-          |> drop_spawn(pid)
-
-        if runner.single_use do
-          stop_reason =
-            case reason do
-              :normal -> :normal
-              other -> {:shutdown, other}
+            if runner.single_use do
+              {:stop, reason, new_state}
+            else
+              {:noreply, new_state}
             end
 
-          {:stop, stop_reason, new_state}
-        else
-          {:noreply, new_state}
+          %{} ->
+            {:noreply, maybe_backend_handle_info(state, msg)}
         end
-
-      %{} ->
-        {:noreply, maybe_backend_handle_info(state, msg)}
     end
+  end
+
+  def handle_info({_ref, :remote_shutdown, reason}, state) do
+    {:stop, {:shutdown, reason}, state}
   end
 
   def handle_info(msg, state) do
@@ -194,52 +217,44 @@ defmodule Dragonfly.Runner do
   end
 
   @impl true
-  def handle_cast({:remote_cast, func}, state) do
-    ref = make_ref()
-
-    {:noreply,
-     state
-     |> put_waiting(ref, nil)
-     |> remote_async_call(ref, _caller_parent = nil, func, _timeout = nil)}
-  end
-
-  @impl true
-  def handle_call({:shutdown, timeout}, _from, state) do
+  def handle_call({:runner_shutdown, timeout}, _from, state) do
     %{runner: runner} = state
     timeout = timeout || runner.shutdown_timeout
     ref = make_ref()
     parent = self()
+    %Runner{terminator: terminator} = runner
 
-    result =
-      runner.backend.remote_spawn_link(state.backend_state, fn ->
+    state = drain_checkouts(state, timeout)
+
+    {:ok, {remote_pid, remote_monitor_ref}} =
+      runner.backend.remote_spawn_monitor(state.backend_state, fn ->
+        :ok = Dragonfly.Terminator.system_shutdown(terminator)
         send(parent, {ref, :ok})
-        runner.backend.system_shutdown()
       end)
 
-    case result do
-      {:ok, _spawn_pid, _backend_state} ->
-        receive do
-          {^ref, :ok} -> {:stop, :normal, :ok, state}
-        after
-          timeout -> exit(:timeout)
-        end
+    receive do
+      {^ref, :ok} ->
+        {:stop, :normal, :ok, state}
 
-      {:error, reason, _} ->
+      {:DOWN, ^remote_monitor_ref, :process, ^remote_pid, reason} ->
         {:stop, {:shutdown, reason}, {:error, reason}, state}
+    after
+      timeout -> exit(:timeout)
     end
   end
 
-  def handle_call({:remote_call, ref, func, timeout}, from, state) do
-    {caller_parent, _ref} = from
+  def handle_call(:checkout, {from_pid, _tag}, state) do
+    ref = Process.monitor(from_pid)
+    {:reply, {ref, state.runner, state.backend_state}, put_checkout(state, from_pid, ref)}
+  end
 
-    {:noreply,
-     state
-     |> put_waiting(ref, from)
-     |> remote_async_call(ref, caller_parent, func, timeout)}
+  def handle_call({:checkin, ref}, _from, state) do
+    Process.demonitor(ref, [:flush])
+    {:reply, :ok, drop_checkout(state, ref)}
   end
 
   def handle_call({:remote_boot, _timeout}, _from, state) do
-    %{runner: runner, backend_state: backend_state} = state
+    %{runner: runner, backend_state: backend_state, otp_app: otp_app} = state
 
     case runner.status do
       :booted ->
@@ -248,129 +263,83 @@ defmodule Dragonfly.Runner do
       :awaiting_boot ->
         time(runner, "runner connect", fn ->
           case runner.backend.remote_boot(backend_state) do
-            {:ok, new_backend_state} ->
-              new_runner = %Runner{runner | status: :booted}
+            {:ok, remote_terminator_pid, new_backend_state} when is_pid(remote_terminator_pid) ->
+              Process.monitor(remote_terminator_pid)
+              new_runner = %Runner{runner | terminator: remote_terminator_pid, status: :booted}
               new_state = %{state | runner: new_runner, backend_state: new_backend_state}
-              {:reply, :ok, schedule_idle_shutdown(new_state)}
+
+              %Runner{
+                idle_shutdown_after: idle_after,
+                idle_shutdown_check: idle_check,
+                terminator: term
+              } = new_runner
+
+              :ok =
+                remote_call!(runner, new_backend_state, runner.boot_timeout, fn ->
+                  # ensure app is fully started if parent connects before up
+                  if otp_app, do: {:ok, _} = Application.ensure_all_started(otp_app)
+                  :ok = Dragonfly.Terminator.schedule_idle_shutdown(term, idle_after, idle_check)
+                end)
+
+              {:reply, :ok, new_state}
 
             {:error, reason} ->
               {:stop, {:shutdown, reason}, state}
 
             other ->
               raise ArgumentError,
-                    "expected #{inspect(runner.backend)}.remote_boot/1 to return {:ok, new_state} | {:error, reason}, got: #{inspect(other)}"
+                    "expected #{inspect(runner.backend)}.remote_boot/1 to return {:ok, remote_terminator_pid, new_state} | {:error, reason}, got: #{inspect(other)}"
           end
         end)
     end
   end
 
-  defp put_waiting(state, ref, {_pid, _tag} = from) do
-    %{state | waiting: Map.put(state.waiting, ref, from)}
-  end
-
-  defp drop_waiting(state, ref) do
-    %{state | waiting: Map.delete(state.waiting, ref)}
-  end
-
-  defp monitor_remote_spawn(state, pid, ref) when is_pid(pid) do
-    Process.monitor(pid)
-    cancel_idle_shutdown(%{state | spawns: Map.put(state.spawns, pid, ref)})
-  end
-
-  defp drop_spawn(state, pid) when is_pid(pid) do
-    schedule_idle_shutdown(%{state | spawns: Map.delete(state.spawns, pid)})
-  end
-
-  defp remote_async_call(state, ref, caller_parent, func, timeout)
-       when is_pid(caller_parent) or is_nil(caller_parent) do
-    %Runner{} = runner = state.runner
-    parent = self()
-    timeout = timeout || state.runner.timeout
-
-    result =
-      runner.backend.remote_spawn_link(state.backend_state, fn ->
-        # This runs on the remote node. Supervise the task so we can monitor it,
-        # deadline it, and handle graceful shutdowns when the whole system goes
-        # down
-        try do
-          task = Task.Supervisor.async_nolink(runner.task_sup, func)
-
-          case Task.yield(task, timeout) || Task.shutdown(task) do
-            {:ok, result} ->
-              # send to caller first to ensure we will have it in the mailbox as soon
-              # as runner parent tells caller it got :ok
-              if caller_parent, do: send(caller_parent, {ref, :ok, result})
-              send(parent, {:remote_ok, ref})
-
-            {:exit, reason} ->
-              send(parent, {:remote_fail, ref, {:exit, reason}})
-
-            nil ->
-              send(parent, {:remote_fail, ref, {:exit, :timeout}})
-          end
-        after
-          if runner.single_use, do: runner.backend.system_shutdown()
-        end
-      end)
-
-    case result do
-      {:ok, spawn_pid, backend_state} ->
-        monitor_remote_spawn(%{state | backend_state: backend_state}, spawn_pid, ref)
-
-      {:error, reason, backend_state} ->
-        maybe_reply_waiting(state, ref, {ref, :fail, {:exit, reason}})
-        {:stop, {:shutdown, reason}, %{state | backend_state: backend_state}}
-    end
-  end
-
-  defp maybe_reply_waiting(state, ref, reply) do
-    case state.waiting do
-      %{^ref => nil} -> :noop
-      %{^ref => from} -> GenServer.reply(from, reply)
-    end
-  end
-
   @doc false
-  def new(opts \\ []) do
+  def new(opts) when is_list(opts) do
     opts =
       Keyword.validate!(opts, [
         :backend,
         :log,
         :single_use,
         :timeout,
-        :connect_timeout,
+        :boot_timeout,
         :shutdown_timeout,
-        :idle_shutdown_after,
-        :task_sup
+        :idle_shutdown_after
       ])
 
-    {backend, backend_opts} =
-      case Keyword.fetch(opts, :backend) do
-        {:ok, backend} when is_atom(backend) ->
+    {idle_shutdown_after_ms, idle_check} =
+      case Keyword.fetch(opts, :idle_shutdown_after) do
+        {:ok, ms} when is_integer(ms) -> {ms, fn -> true end}
+        {:ok, {ms, func}} when is_integer(ms) and is_function(func, 0) -> {ms, func}
+        other when other in [{:ok, nil}, :error] -> {30_000, fn -> true end}
+      end
+
+    runner =
+      %Runner{
+        status: :awaiting_boot,
+        backend: :pending,
+        backend_init: :pending,
+        log: Keyword.get(opts, :log, :info),
+        single_use: Keyword.get(opts, :single_use, false),
+        timeout: opts[:timeout] || 30_000,
+        boot_timeout: opts[:boot_timeout] || 30_000,
+        shutdown_timeout: opts[:shutdown_timeout] || 30_000,
+        idle_shutdown_after: idle_shutdown_after_ms,
+        idle_shutdown_check: idle_check,
+        terminator: nil
+      }
+
+    {backend, backend_init} =
+      case Keyword.fetch!(opts, :backend) do
+        backend when is_atom(backend) ->
           opts = Application.get_env(:dragonfly, backend) || []
           {backend, backend.init(opts)}
 
-        {:ok, {backend, opts}} when is_atom(backend) and is_list(opts) ->
-          {backend, backend.init(opts)}
-
-        :error ->
-          backend = Backend.impl()
-          opts = Application.get_env(:dragonfly, backend) || []
+        {backend, opts} when is_atom(backend) and is_list(opts) ->
           {backend, backend.init(opts)}
       end
 
-    %Runner{
-      status: :awaiting_boot,
-      backend: backend,
-      backend_init: backend_opts,
-      log: Keyword.get(opts, :log, :info),
-      single_use: Keyword.get(opts, :single_use, false),
-      timeout: opts[:timeout] || 20_000,
-      connect_timeout: opts[:connect_timeout] || 30_000,
-      shutdown_timeout: opts[:shutdown_timeout] || 5_000,
-      idle_shutdown_after: opts[:idle_shutdown_after],
-      task_sup: opts[:task_sup] || Dragonfly.TaskSupervisor
-    }
+    %Runner{runner | backend: backend, backend_init: backend_init}
   end
 
   defp time(%Runner{log: :debug}, label, func) do
@@ -384,21 +353,69 @@ defmodule Dragonfly.Runner do
     func.()
   end
 
-  defp debug(%{runner: %Runner{log: level}}, msg) do
-    if level, do: Logger.log(level, msg)
+  defp put_checkout(state, from_pid, ref) when is_pid(from_pid) do
+    %{state | checkouts: Map.put(state.checkouts, ref, from_pid)}
   end
 
-  defp cancel_idle_shutdown(state) do
-    if state.idle_timer, do: Process.cancel_timer(state.idle_timer)
-    %{state | idle_timer: nil}
+  defp drop_checkout(state, ref) when is_reference(ref) do
+    %{^ref => _from_pid} = state.checkouts
+    %{state | checkouts: Map.delete(state.checkouts, ref)}
   end
 
-  defp schedule_idle_shutdown(%{runner: %Runner{} = runner} = state) do
-    state = cancel_idle_shutdown(state)
-    if runner.idle_shutdown_after do
-      %{state | idle_timer: Process.send_after(self(), :idle_shutdown, runner.idle_shutdown_after)}
-    else
-      state
+  defp remote_call!(%Runner{} = runner, backend_state, timeout, func) do
+    case remote_call(runner, backend_state, timeout, func) do
+      {:ok, value} -> value
+      {:exit, reason} -> exit(reason)
+      {:error, error} -> raise(error)
+      {:throw, val} -> throw(val)
+    end
+  end
+
+  defp remote_call(%Runner{} = runner, backend_state, timeout, func) do
+    parent_ref = make_ref()
+    parent = self()
+
+    {:ok, {remote_pid, remote_monitor_ref}} =
+      runner.backend.remote_spawn_monitor(backend_state, fn ->
+        # This runs on the remote node
+        send(parent, {parent_ref, func.()})
+      end)
+
+    receive do
+      {^parent_ref, result} ->
+        Process.demonitor(remote_monitor_ref, [:flush])
+        {:ok, result}
+
+      {:DOWN, ^remote_monitor_ref, :process, ^remote_pid, reason} ->
+        case reason do
+          :killed -> {:exit, :timeout}
+          other -> {:exit, other}
+        end
+
+      {:EXIT, ^remote_pid, reason} ->
+        {:exit, reason}
+    after
+      timeout ->
+        {:exit, :timeout}
+    end
+  end
+
+  @drain_timeout :drain_timeout
+  defp drain_checkouts(state, timeout) do
+    case state.checkouts do
+      checkouts when checkouts == %{} ->
+        state
+
+      checkouts ->
+        Process.send_after(self(), @drain_timeout, timeout)
+
+        Enum.reduce(checkouts, state, fn {ref, _from_pid}, acc ->
+          receive do
+            {:checkin, ^ref} -> drop_checkout(acc, ref)
+            {:DOWN, ^ref, :process, _pid, _reason} -> drop_checkout(acc, ref)
+            @drain_timeout -> exit(:timeout)
+          end
+        end)
     end
   end
 end
