@@ -280,8 +280,8 @@ defmodule Dragonfly.Terminator do
   end
 
   defp system_stop(%Terminator{parent: parent} = state, log) do
-    log(state, "#{inspect(__MODULE__)}.system_stop: #{log}")
     if state.status != :stopping do
+      log(state, "#{inspect(__MODULE__)}.system_stop: #{log}")
       parent.backend.system_shutdown()
     end
     %Terminator{state | status: :stopping}

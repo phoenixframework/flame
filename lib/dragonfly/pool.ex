@@ -19,7 +19,7 @@ defmodule Dragonfly.Pool do
         {Dragonfly.Pool, name: MyRunner, min: 1, max: 10, max_concurrency: 100}
       ]
 
-  # TODO spin down after inactive_shutdown
+  See `start_link/1` for supported options.
   """
   use GenServer
 
@@ -27,8 +27,8 @@ defmodule Dragonfly.Pool do
   alias Dragonfly.Pool.{RunnerState, WaitingState}
 
   @default_max_concurrency 100
-  @boot_timeout 20_000
-  @idle_shutdown_after 20_000
+  @boot_timeout 30_000
+  @idle_shutdown_after 30_000
 
   defstruct name: nil,
             dynamic_sup: nil,
@@ -52,7 +52,42 @@ defmodule Dragonfly.Pool do
   end
 
   @doc """
-  TODO
+  Starts a pool of runners.
+
+  ## Options
+
+    * `:name` - The name of the pool, for example: `MyApp.FFMPegRunner`
+
+    * `:min` - The minimum number of runners to keep in the pool at all times.
+      For "scale to zero" behavior you may pass `0`. When starting as a dragonfly child,
+      the `:min` will be forced to zero to avoid recursively starting backend resources.
+
+    * `:max` - The maximum number of runners to elastically grow to in the pool.
+
+    * `:max_concurrency` - The maximum number of concurrent executions per runner before
+      booting new runners or queueing calls. Defaults to `100`.
+
+    * `:single_use` - if `true`, runners will be terminated after each call completes.
+      Defaults `false`.
+
+    * `:backend` - The backend to use. Defaults to the configured `:dragonfly, :backend` or
+      `Dragonfly.LocalBackend` if not configured.
+
+    * `:log` - The log level to use for verbose logging. Defaults to `false`.
+
+    * `:timeout` - The time to allow functions to execute on a remote node. Defaults to 30 seconds.
+      This value is also used as the default `Dragonfly.call/3` timeout for the caller.
+    * `:boot_timeout` - The time to allow for booting and connecting to a remote node.
+      Defaults to 30 seconds.
+
+    * `:shutdown_timeout` - The time to allow for graceful shutdown on the remote node.
+      Defaults to 30 seconds.
+
+    * `:idle_shutdown_after` - The amount of time and function check to idle a remote node
+      down after a period of inactivity. Defaults to 30 seconds. A tuple may also be passed
+      to check a spefici condition, for example:
+
+          {10_000, fn -> Supervisor.which_children(MySup) == []}
   """
   def start_link(opts) do
     Keyword.validate!(opts, [
@@ -67,7 +102,7 @@ defmodule Dragonfly.Pool do
       :log,
       :single_use,
       :timeout,
-      :connect_timeout,
+      :boot_timeout,
       :shutdown_timeout
     ])
 
@@ -109,7 +144,7 @@ defmodule Dragonfly.Pool do
   @impl true
   def init(opts) do
     name = Keyword.fetch!(opts, :name)
-    boot_timeout = Keyword.get(opts, :connect_timeout, @boot_timeout)
+    boot_timeout = Keyword.get(opts, :boot_timeout, @boot_timeout)
     :ets.new(name, [:set, :public, :named_table, read_concurrency: true])
     :ets.insert(name, {:boot_timeout, boot_timeout})
     terminator_sup = Keyword.fetch!(opts, :terminator_sup)
@@ -150,7 +185,7 @@ defmodule Dragonfly.Pool do
           :log,
           :single_use,
           :timeout,
-          :connect_timeout,
+          :boot_timeout,
           :shutdown_timeout,
           :idle_shutdown_after
         ]

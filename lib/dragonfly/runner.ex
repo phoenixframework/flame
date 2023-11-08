@@ -1,5 +1,25 @@
 defmodule Dragonfly.Runner do
   @moduledoc false
+  # ## Runners
+
+  # In practice, users will utilize the `Dragonfly.call/3` and `Dragonfly.cast/3` functions
+  # to accomplish their work. These functions are backed by a `Dragonfly.Pool` of
+  # `Dragonfly.Runner`'s
+  #
+  # A `Dragonfly.Runner` is responsible for booting a new node, and executing concurrent
+  # functions on it. For example:
+  #
+  #     {:ok, runner} = Runner.start_link(backend: Dragonfly.FlyBackend)
+  #     :ok = Runner.remote_boot(runner)
+  #     Runner.call(runner, fn -> :operation1 end)
+  #     Runner.cast(runner, fn -> :operation2 end)
+  #     Runner.shutdown(runner)
+  #
+  # When a caller exits or crashes, the remote node will automatically be terminated.
+  # For distributed erlang backends, like `Dragonfly.FlyBackend`, this will be
+  # accomplished automatically by the `Dragonfly.Terminator`, but other methods
+  # are possible.
+
   use GenServer
   require Logger
 
@@ -17,7 +37,7 @@ defmodule Dragonfly.Runner do
              :timeout,
              :status,
              :log,
-             :connect_timeout,
+             :boot_timeout,
              :idle_shutdown_after,
              :idle_shutdown_check
            ]}
@@ -33,7 +53,7 @@ defmodule Dragonfly.Runner do
             timeout: 20_000,
             status: nil,
             log: :info,
-            connect_timeout: 10_000,
+            boot_timeout: 10_000,
             shutdown_timeout: 5_000,
             idle_shutdown_after: nil,
             idle_shutdown_check: nil
@@ -255,7 +275,7 @@ defmodule Dragonfly.Runner do
               } = new_runner
 
               :ok =
-                remote_call!(runner, new_backend_state, runner.connect_timeout, fn ->
+                remote_call!(runner, new_backend_state, runner.boot_timeout, fn ->
                   # ensure app is fully started if parent connects before up
                   if otp_app, do: {:ok, _} = Application.ensure_all_started(otp_app)
                   :ok = Dragonfly.Terminator.schedule_idle_shutdown(term, idle_after, idle_check)
@@ -282,7 +302,7 @@ defmodule Dragonfly.Runner do
         :log,
         :single_use,
         :timeout,
-        :connect_timeout,
+        :boot_timeout,
         :shutdown_timeout,
         :idle_shutdown_after
       ])
@@ -301,9 +321,9 @@ defmodule Dragonfly.Runner do
         backend_init: :pending,
         log: Keyword.get(opts, :log, :info),
         single_use: Keyword.get(opts, :single_use, false),
-        timeout: opts[:timeout] || 20_000,
-        connect_timeout: opts[:connect_timeout] || 30_000,
-        shutdown_timeout: opts[:shutdown_timeout] || 5_000,
+        timeout: opts[:timeout] || 30_000,
+        boot_timeout: opts[:boot_timeout] || 30_000,
+        shutdown_timeout: opts[:shutdown_timeout] || 30_000,
         idle_shutdown_after: idle_shutdown_after_ms,
         idle_shutdown_check: idle_check,
         terminator: nil

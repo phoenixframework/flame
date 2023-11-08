@@ -1,4 +1,24 @@
 defmodule Dragonfly.FlyBackend do
+  @moduledoc """
+  The `Dragonfly.Backend` using [Fly.io](https://fly.io) machines.
+
+  The only required configuration is telling Dragonly to use the
+  `Dragonfly.FlyBackend` by default and the `:token` which is your Fly.io API
+  token. These can be set via application configuration in your `config/runtime.exs`
+  withing a `:prod` block:
+
+      if config_env() == :prod do
+        config :dragonfly, :backend, Dragonfly.FlyBackend
+        config :dragonfly, Dragonfly.FlyBackend, token: System.fetch_env!("FLY_API_TOKEN")
+        ...
+      end
+
+  To set your `FLY_API_TOKEN` secret, you can run the following commands locally:
+
+  ```bash
+  $ fly secrets set FLY_API_TOKEN="$(fly auth token)"
+  ```
+  """
   @behaviour Dragonfly.Backend
 
   alias Dragonfly.FlyBackend
@@ -17,7 +37,7 @@ defmodule Dragonfly.FlyBackend do
              :runner_instance_id,
              :runner_private_ip,
              :runner_node_name,
-             :connect_timeout
+             :boot_timeout
            ]}
   defstruct host: nil,
             env: %{},
@@ -25,7 +45,7 @@ defmodule Dragonfly.FlyBackend do
             image: nil,
             app: nil,
             token: nil,
-            connect_timeout: nil,
+            boot_timeout: nil,
             runner_id: nil,
             remote_terminator_pid: nil,
             parent_ref: nil,
@@ -46,7 +66,7 @@ defmodule Dragonfly.FlyBackend do
       token: System.get_env("FLY_API_TOKEN"),
       host: "https://api.machines.dev",
       size: "performance-2x",
-      connect_timeout: 30_000,
+      boot_timeout: 30_000,
       runner_node_basename: node_base
     }
 
@@ -62,7 +82,11 @@ defmodule Dragonfly.FlyBackend do
     end
 
     parent_ref = make_ref()
-    encoded_parent = Dragonfly.Parent.encode(parent_ref, self(), __MODULE__)
+
+    encoded_parent =
+      parent_ref
+      |> Dragonfly.Parent.new(self(), __MODULE__)
+      |> Dragonfly.Parent.encode()
 
     new_env =
       Map.merge(
@@ -109,7 +133,7 @@ defmodule Dragonfly.FlyBackend do
     {req, req_connect_time} =
       with_elapsed_ms(fn ->
         Req.post!("#{state.host}/v1/apps/#{state.app}/machines",
-          connect_options: [timeout: state.connect_timeout],
+          connect_options: [timeout: state.boot_timeout],
           retry: false,
           auth: {:bearer, state.token},
           json: %{
@@ -125,7 +149,7 @@ defmodule Dragonfly.FlyBackend do
         )
       end)
 
-    remaining_connect_window = state.connect_timeout - req_connect_time
+    remaining_connect_window = state.boot_timeout - req_connect_time
 
     case req.body do
       %{"id" => id, "instance_id" => instance_id, "private_ip" => ip} ->
@@ -144,7 +168,7 @@ defmodule Dragonfly.FlyBackend do
               remote_terminator_pid
           after
             remaining_connect_window ->
-              Logger.error("failed to connect to fly machine within #{state.connect_timeout}ms")
+              Logger.error("failed to connect to fly machine within #{state.boot_timeout}ms")
               exit(:timeout)
           end
 
