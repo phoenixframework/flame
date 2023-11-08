@@ -78,8 +78,9 @@ defmodule Dragonfly.Pool do
   TODO
   """
   def call(name, func, opts \\ []) do
+    opts = Keyword.put_new_lazy(opts, :timeout, fn -> lookup_boot_timeout(name) end)
     {{ref, runner_pid}, opts} =
-      with_elapsed_timeout(opts, fn -> GenServer.call(name, :checkout, opts[:timeout] || 15000) end)
+      with_elapsed_timeout(opts, fn -> GenServer.call(name, :checkout, opts[:timeout]) end)
 
     result = Runner.call(runner_pid, func, opts[:timeout])
     :ok = GenServer.call(name, {:checkin, ref})
@@ -101,8 +102,16 @@ defmodule Dragonfly.Pool do
     {result, opts}
   end
 
+  defp lookup_boot_timeout(name) do
+    :ets.lookup_element(name, :boot_timeout, 2)
+  end
+
   @impl true
   def init(opts) do
+    name = Keyword.fetch!(opts, :name)
+    boot_timeout = Keyword.get(opts, :connect_timeout, @boot_timeout)
+    :ets.new(name, [:set, :public, :named_table, read_concurrency: true])
+    :ets.insert(name, {:boot_timeout, boot_timeout})
     terminator_sup = Keyword.fetch!(opts, :terminator_sup)
     runner_opts = runner_opts(opts, terminator_sup)
     min = Keyword.fetch!(opts, :min)
@@ -118,10 +127,10 @@ defmodule Dragonfly.Pool do
     state = %Pool{
       dynamic_sup: Keyword.fetch!(opts, :dynamic_sup),
       terminator_sup: terminator_sup,
-      name: Keyword.fetch!(opts, :name),
+      name: name,
       min: min,
       max: Keyword.fetch!(opts, :max),
-      boot_timeout: Keyword.get(opts, :connect_timeout, @boot_timeout),
+      boot_timeout: boot_timeout,
       idle_shutdown_after: Keyword.get(opts, :idle_shutdown_after, @idle_shutdown_after),
       max_concurrency: Keyword.get(opts, :max_concurrency, @default_max_concurrency),
       runner_opts: runner_opts
