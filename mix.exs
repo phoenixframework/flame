@@ -1,16 +1,16 @@
-defmodule Dragonfly.Runner.MixProject do
+defmodule FLAME.Runner.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :dragonfly,
-      version: "0.1.4",
+      app: :flame,
+      version: "0.1.0",
       elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       package: package(),
-      source_url: "https://github.com/phoenixframework/dragonfly",
+      source_url: "https://github.com/phoenixframework/flame",
       homepage_url: "http://www.phoenixframework.org",
       description: """
       Remote empheral application process runner.
@@ -23,7 +23,7 @@ defmodule Dragonfly.Runner.MixProject do
       maintainers: ["Chris McCord", "Jason Stiebs"],
       licenses: ["MIT"],
       links: %{
-        GitHub: "https://github.com/phoenixframework/dragonfly"
+        GitHub: "https://github.com/phoenixframework/flame"
       },
       files: ~w(lib CHANGELOG.md LICENSE.md mix.exs README.md)
     ]
@@ -32,7 +32,7 @@ defmodule Dragonfly.Runner.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      mod: {Dragonfly.Application, []},
+      mod: {FLAME.Application, []},
       extra_applications: [:logger]
     ]
   end

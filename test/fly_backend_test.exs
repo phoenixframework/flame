@@ -1,15 +1,15 @@
-defmodule Dragonfly.FlyBackendTest do
+defmodule FLAME.FlyBackendTest do
   use ExUnit.Case, async: false
 
-  alias Dragonfly.{Runner, FlyBackend}
+  alias FLAME.{Runner, FlyBackend}
 
   def new({backend, opts}) do
     Runner.new(backend: {backend, Keyword.merge([terminator_sup: __MODULE__], opts)})
   end
 
   setup do
-    Application.delete_env(:dragonfly, :backend)
-    Application.delete_env(:dragonfly, FlyBackend)
+    Application.delete_env(:flame, :backend)
+    Application.delete_env(:flame, FlyBackend)
   end
 
   test "explicit backend" do
@@ -56,23 +56,23 @@ defmodule Dragonfly.FlyBackendTest do
 
   test "global configured backend" do
     assert_raise ArgumentError, ~r/missing :token/, fn ->
-      Application.put_env(:dragonfly, Dragonfly.FlyBackend, [])
-      Runner.new([backend: Dragonfly.FlyBackend])
+      Application.put_env(:flame, FLAME.FlyBackend, [])
+      Runner.new([backend: FLAME.FlyBackend])
     end
 
     assert_raise ArgumentError, ~r/missing :image/, fn ->
-      Application.put_env(:dragonfly, Dragonfly.FlyBackend, token: "123")
-      Runner.new([backend: Dragonfly.FlyBackend])
+      Application.put_env(:flame, FLAME.FlyBackend, token: "123")
+      Runner.new([backend: FLAME.FlyBackend])
     end
 
     assert_raise ArgumentError, ~r/missing :app/, fn ->
-      Application.put_env(:dragonfly, Dragonfly.FlyBackend, token: "123", image: "img")
-      Runner.new([backend: Dragonfly.FlyBackend])
+      Application.put_env(:flame, FLAME.FlyBackend, token: "123", image: "img")
+      Runner.new([backend: FLAME.FlyBackend])
     end
 
-    Application.put_env(:dragonfly, :backend, Dragonfly.FlyBackend)
-    Application.put_env(:dragonfly, Dragonfly.FlyBackend, token: "123", image: "img", app: "app")
+    Application.put_env(:flame, :backend, FLAME.FlyBackend)
+    Application.put_env(:flame, FLAME.FlyBackend, token: "123", image: "img", app: "app")
 
-    assert Runner.new([backend: Dragonfly.FlyBackend])
+    assert Runner.new([backend: FLAME.FlyBackend])
   end
 end

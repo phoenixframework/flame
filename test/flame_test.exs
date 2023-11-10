@@ -1,7 +1,7 @@
-defmodule Dragonfly.DragonflyTest do
+defmodule FLAME.FLAMETest do
   use ExUnit.Case, async: true
 
-  alias Dragonfly.Pool
+  alias FLAME.Pool
 
   defp sim_long_running(pool, time \\ 1_000) do
     ref = make_ref()
@@ -9,7 +9,7 @@ defmodule Dragonfly.DragonflyTest do
 
     task =
       Task.start_link(fn ->
-        Dragonfly.call(pool, fn ->
+        FLAME.call(pool, fn ->
           send(parent, {ref, :called})
           Process.sleep(time)
         end)
@@ -31,18 +31,18 @@ defmodule Dragonfly.DragonflyTest do
   @tag runner: [min: 1, max: 2, max_concurrency: 2]
   test "init boots min runners synchronously", %{dyn_sup: dyn_sup} = config do
     min_pool = Supervisor.which_children(dyn_sup)
-    assert [{:undefined, _pid, :worker, [Dragonfly.Runner]}] = min_pool
+    assert [{:undefined, _pid, :worker, [FLAME.Runner]}] = min_pool
     # execute against single runner
-    assert Dragonfly.call(config.test, fn -> :works end) == :works
+    assert FLAME.call(config.test, fn -> :works end) == :works
 
     # dynamically grows to max
     _task1 = sim_long_running(config.test)
-    assert Dragonfly.call(config.test, fn -> :works end) == :works
+    assert FLAME.call(config.test, fn -> :works end) == :works
     # max concurrency still below threshold
     assert Supervisor.which_children(dyn_sup) == min_pool
     # max concurrency above threshold boots new runner
     _task2 = sim_long_running(config.test)
-    assert Dragonfly.call(config.test, fn -> :works end) == :works
+    assert FLAME.call(config.test, fn -> :works end) == :works
     new_pool = Supervisor.which_children(dyn_sup)
     refute new_pool == min_pool
     assert length(new_pool) == 2
@@ -50,10 +50,10 @@ defmodule Dragonfly.DragonflyTest do
     _task3 = sim_long_running(config.test)
     _task4 = sim_long_running(config.test)
     # task is queued and times out
-    queued = spawn(fn -> Dragonfly.call(config.test, fn -> :queued end, timeout: 100) end)
+    queued = spawn(fn -> FLAME.call(config.test, fn -> :queued end, timeout: 100) end)
     ref = Process.monitor(queued)
     assert_receive {:DOWN, ^ref, :process, _, {:timeout, _}}, 1000
-    assert Dragonfly.call(config.test, fn -> :queued end) == :queued
+    assert FLAME.call(config.test, fn -> :queued end) == :queued
     assert new_pool == Supervisor.which_children(dyn_sup)
   end
 
@@ -65,8 +65,8 @@ defmodule Dragonfly.DragonflyTest do
 
     # we've scaled from min 1 to max 2 at this point
     assert [
-             {:undefined, runner1, :worker, [Dragonfly.Runner]},
-             {:undefined, runner2, :worker, [Dragonfly.Runner]}
+             {:undefined, runner1, :worker, [FLAME.Runner]},
+             {:undefined, runner2, :worker, [FLAME.Runner]}
            ] = Supervisor.which_children(dyn_sup)
 
     Process.monitor(runner1)
@@ -74,7 +74,7 @@ defmodule Dragonfly.DragonflyTest do
     assert_receive {:DOWN, _ref, :process, ^runner2, {:shutdown, :idle}}, 1000
     refute_receive {:DOWN, _ref, :process, ^runner1, {:shutdown, :idle}}
 
-    assert [{:undefined, ^runner1, :worker, [Dragonfly.Runner]}] =
+    assert [{:undefined, ^runner1, :worker, [FLAME.Runner]}] =
              Supervisor.which_children(dyn_sup)
   end
 
@@ -83,7 +83,7 @@ defmodule Dragonfly.DragonflyTest do
     test "normal execution", %{} = config do
       sim_long_running(config.test, 100)
       parent = self()
-      assert Dragonfly.cast(config.test, fn -> send(parent, {:ran, self()}) end) == :ok
+      assert FLAME.cast(config.test, fn -> send(parent, {:ran, self()}) end) == :ok
       assert_receive {:ran, cast_pid}
       Process.monitor(cast_pid)
       assert_receive {:DOWN, _ref, :process, ^cast_pid, :normal}
@@ -93,7 +93,7 @@ defmodule Dragonfly.DragonflyTest do
     test "with exit", %{} = config do
       sim_long_running(config.test, 100)
       parent = self()
-      assert Dragonfly.cast(config.test, fn ->
+      assert FLAME.cast(config.test, fn ->
         send(parent, {:ran, self()})
         exit(:boom)
       end) == :ok

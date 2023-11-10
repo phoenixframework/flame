@@ -1,15 +1,15 @@
-defmodule Dragonfly.Backend do
+defmodule FLAME.Backend do
   @moduledoc """
-  Defines a behavior for a Dragonfly backend.
+  Defines a behavior for a FLAME backend.
 
-  A Dragonfly backend is responsible for booting remote compute resources,
+  A FLAME backend is responsible for booting remote compute resources,
   connecting them back to the parent node, and executing functions on them.
 
-  The default `Dragonfly.LocalBackend` simply runs your code locally, allowing
-  you to development and test your application using `Dragonfly.call/3` without
+  The default `FLAME.LocalBackend` simply runs your code locally, allowing
+  you to development and test your application using `FLAME.call/3` without
   running an external backend.
 
-  See `Dragonfly.FlyBackend` for an example implementation of this behavior.
+  See `FLAME.FlyBackend` for an example implementation of this behavior.
   """
   @callback init(opts :: Keyword.t()) :: {:ok, state :: term()} | {:error, term()}
   @callback remote_spawn_monitor(state :: term, func :: function() | term) ::
@@ -40,5 +40,5 @@ defmodule Dragonfly.Backend do
     impl().handle_info(msg, state)
   end
 
-  def impl, do: Application.get_env(:dragonfly, :backend, Dragonfly.LocalBackend)
+  def impl, do: Application.get_env(:flame, :backend, FLAME.LocalBackend)
 end

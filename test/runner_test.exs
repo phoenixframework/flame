@@ -1,9 +1,9 @@
-defmodule Dragonfly.RunnerTest do
+defmodule FLAME.RunnerTest do
   use ExUnit.Case, async: false
 
   import Mox
 
-  alias Dragonfly.{Runner, MockBackend}
+  alias FLAME.{Runner, MockBackend}
 
   # Make sure mocks are verified when the test exits
   setup :set_mox_global
@@ -23,11 +23,11 @@ defmodule Dragonfly.RunnerTest do
   }
 
   defp remote_boot(state) do
-    parent = Dragonfly.Parent.new(make_ref(), self(), MockBackend)
+    parent = FLAME.Parent.new(make_ref(), self(), MockBackend)
 
     spec = %{
-      id: Dragonfly.Terminator,
-      start: {Dragonfly.Terminator, :start_link, [[parent: parent]]},
+      id: FLAME.Terminator,
+      start: {FLAME.Terminator, :start_link, [[parent: parent]]},
       restart: :temporary,
       type: :worker
     }
@@ -79,8 +79,8 @@ defmodule Dragonfly.RunnerTest do
   end
 
   setup_all do
-    Mox.defmock(MockBackend, for: Dragonfly.Backend)
-    Application.put_env(:dragonfly, :backend, Dragonfly.MockBackend)
+    Mox.defmock(MockBackend, for: FLAME.Backend)
+    Application.put_env(:flame, :backend, FLAME.MockBackend)
     :ok
   end
 

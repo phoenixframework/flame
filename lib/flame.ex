@@ -1,8 +1,8 @@
-defmodule Dragonfly do
+defmodule FLAME do
   @moduledoc ~S"""
-  Dragonfly remotely executes your application code on ephemeral nodes.
+  FLAME remotely executes your application code on ephemeral nodes.
 
-  Dragonfly allows you to scale your application operations on a granular
+  FLAME allows you to scale your application operations on a granular
   level **without rewriting your code**. For example, imagine the following function
   in your application that transcodes a video, saves the result to video storage,
   and updates the database:
@@ -19,15 +19,15 @@ defmodule Dragonfly do
   is necessarily an expensive CPU bound operation. In production, only a
   few concurrent users can saturate your CPU and cause your entire application,
   web requests, etc, to come to crawl. This is where folks typically reach for
-  FaaS or external service solutions, but Dragonfly gives you a better way.
+  FaaS or external service solutions, but FLAME gives you a better way.
 
-  Simply wrap your your existing code in a Dragonfly function and it will be executed
+  Simply wrap your your existing code in a FLAME function and it will be executed
   on a newly spawned, ephemeral node. Using Elixir and Erlang's built in distribution
   features, entire function closures, including any state they close over, can be sent
   and executed on a remote node:
 
       def resize_video_quality(%Video{} = video) do
-        Dragonfly.call(MyApp.FFMpegRunner, fn ->
+        FLAME.call(MyApp.FFMpegRunner, fn ->
           path = "#{vid.id}_720p.mp4"
           System.cmd("ffmpeg", ~w(-i #{vid.url} -s 720x480 -c:a copy #{path}))
           VideoStore.put_file!("videos/#{path}", path)
@@ -43,12 +43,12 @@ defmodule Dragonfly do
   executing, the ephemeral node is terminated. This means you can elastically scale
   your app as load increases, and only pay for the resources you need at the time.
 
-  To support your Dragonfly calls, you'll need to add a named `Dragonfly.Pool` to your
+  To support your FLAME calls, you'll need to add a named `FLAME.Pool` to your
   application's supervision tree, which we'll discuss next.
 
   ## Pools
 
-  A `Dragonfly.Pool` provides elastic runner scaling, allowing a minimum and
+  A `FLAME.Pool` provides elastic runner scaling, allowing a minimum and
   maximum number of runners to be configured, and idle'd down as load decreases.
 
   Pools give you elastic scale that maximizes the newly spawned hardware.
@@ -59,7 +59,7 @@ defmodule Dragonfly do
 
       children = [
         ...,
-        {Dragonfly.Pool,
+        {FLAME.Pool,
          name: App.FFMpegRunner,
          min: 0,
          max: 10,
@@ -67,45 +67,45 @@ defmodule Dragonfly do
          idle_shutdown_after: :timer.minutes(5)},
       ]
 
-  Here we add a `Dragonfly.Pool` to our application supervision tree, configuring
+  Here we add a `FLAME.Pool` to our application supervision tree, configuring
   a minimum of 0 and maximum of 10 runners. This acheives "scale to zero" behavior
   while also allowing the pool to scale up to 10 runners when load increases.
   Each runner in the case will be able to execute up to 5 concurrent functions.
   The runners will shutdown atter 5 minutes of inactivity.
 
-  Calling a pool is as simple as passing its name to the Dragonfly functions:
+  Calling a pool is as simple as passing its name to the FLAME functions:
 
-      Dragonfly.call(App.FFMpegRunner, fn -> :operation1 end)
+      FLAME.call(App.FFMpegRunner, fn -> :operation1 end)
 
   You'll also often want to enable or disable other application services based on whether
-  your application is being started as child Dragonfly runner or being run directly.
+  your application is being started as child FLAME runner or being run directly.
   See the next `Deployment Considerations` section below for details.
 
   ## Deployment Considerations
 
-  Dragonfly nodes effectively clone and start your entire application. This is great
+  FLAME nodes effectively clone and start your entire application. This is great
   because all application services and dependencies are ready to go and be used to
-  support your Dragonfly calls; however, You'll also often want to enable or disable
-  services based on whether your node is running as a Dragonfly child or not.
-  For example, there's usually no need to serve your Phoenix endpoint within a Dragonfly.
+  support your FLAME calls; however, You'll also often want to enable or disable
+  services based on whether your node is running as a FLAME child or not.
+  For example, there's usually no need to serve your Phoenix endpoint within a FLAME.
   You also likely only need a single or small number of database connections instead of
   your existing pool size.
 
-  To accomplish these you can use `Dragonfly.Parent.get/0` to conditionally enable or
+  To accomplish these you can use `FLAME.Parent.get/0` to conditionally enable or
   disable processes in you `applicaiton.ex` file:
 
       def start(_type, _args) do
-        dragonfly_parent = Dragonfly.Parent.get()
+        flame_parent = FLAME.Parent.get()
 
         children = [
           ...,
-          {Dragonfly.Pool,
+          {FLAME.Pool,
            name: Thumbs.FFMpegRunner,
            min: 0,
            max: 10,
            max_concurrency: 5,
            idle_shutdown_after: :timer.minutes(5)},
-        !dragonfly_parent && ThumbsWeb.Endpoint
+        !flame_parent && ThumbsWeb.Endpoint
         ]
         |> Enum.filter(& &1)
 
@@ -113,13 +113,13 @@ defmodule Dragonfly do
         Supervisor.start_link(children, opts)
       end
 
-  Here we filter the phoenix endpoint from being started when running as a Dragonfly
+  Here we filter the phoenix endpoint from being started when running as a FLAME
   child because we have no need to handle web requests in this case.
 
-  Or you can use `Dragonfly.Parent.get/0` to configure your database pool size:
+  Or you can use `FLAME.Parent.get/0` to configure your database pool size:
 
       pool_size =
-        if Dragonfly.Parent.get() do
+        if FLAME.Parent.get() do
           1
         else
           String.to_integer(System.get_env("POOL_SIZE") || "10")
@@ -131,13 +131,13 @@ defmodule Dragonfly do
 
   ## Backends
 
-  The `Dragonfly.Backend` behavior defines an interface for spawning remote
+  The `FLAME.Backend` behavior defines an interface for spawning remote
   application nodes and sending functions to them. By default, the
-  `Dragonfly.LocalBackend` is used, which is great for development and test
+  `FLAME.LocalBackend` is used, which is great for development and test
   environments, as you can have your code simply execute locally in most cases
   and worry about scaling the operation only in production.
 
-  For production, Dragonfly provides the `Dragonfly.FlyBackend`, which uses
+  For production, FLAME provides the `FLAME.FlyBackend`, which uses
   [Fly.io](https://fly.io). Because Fly deploys a containerized machine of
   your application, a single Fly API call can boot a machine running your
   exact Docker deployment image, allowing closures to be executed across
@@ -146,36 +146,36 @@ defmodule Dragonfly do
   Default backends can be configured in your `config/runtime.exs`:
 
       if config_env() == :prod do
-        config :dragonfly, :backend, Dragonfly.FlyBackend
-        config :dragonfly, Dragonfly.FlyBackend, token: System.fetch_env!("FLY_API_TOKEN")
+        config :flame, :backend, FLAME.FlyBackend
+        config :flame, FLAME.FlyBackend, token: System.fetch_env!("FLY_API_TOKEN")
         ...
       end
 
   ## Termination
 
-  Dragonfly runs a termination process to allow remotely spawned functions time to
+  FLAME runs a termination process to allow remotely spawned functions time to
   complete before the node is terminated. This process is started automatically
   with the library. The shutdown timeout by default is 30s, but can be configured
   in your application configuration, such as `config/runtime.exs`:
 
-      config :dragonfly, :terminator, shutdown_timeout: :timer.seconds(10)
+      config :flame, :terminator, shutdown_timeout: :timer.seconds(10)
   """
   require Logger
 
   @doc """
-  Calls a function in a remote runner for the given `Dragonfly.Pool`.
+  Calls a function in a remote runner for the given `FLAME.Pool`.
 
   ## Options
 
     * `:timeout` - The timeout the caller is willing to wait for a response before an
       exit with `:timeout`. Defaults to the configured timeout of the pool.
-      The executed function will also be terminated on the remote dragonfly if
+      The executed function will also be terminated on the remote flame if
       the timeout is reached.
 
   ## Examples
 
     def my_expensive_thing(arg) do
-      Dragonfly.call(MyApp.Runner, fn ->
+      FLAME.call(MyApp.Runner, fn ->
         # i'm now doing expensive work inside a new node
         # pubsub and repo access all just work
         Phoenix.PubSub.broadcast(MyApp.PubSub, "topic", result)
@@ -187,17 +187,24 @@ defmodule Dragonfly do
   When the caller exits, the remote runner will be terminated.
   """
   def call(pool, func, opts) when is_atom(pool) and is_function(func, 0) and is_list(opts) do
-    Dragonfly.Pool.call(pool, func, opts)
+    FLAME.Pool.call(pool, func, opts)
   end
 
   def call(pool, func) when is_atom(pool) and is_function(func, 0) do
-    Dragonfly.Pool.call(pool, func, [])
+    FLAME.Pool.call(pool, func, [])
   end
 
   @doc """
-  Casts a function to a remote runner for the given `Dragonfly.Pool`.
+  Casts a function to a remote runner for the given `FLAME.Pool`.
   """
   def cast(pool, func) when is_atom(pool) and is_function(func, 0) do
-    Dragonfly.Pool.cast(pool, func)
+    FLAME.Pool.cast(pool, func)
+  end
+
+  @doc """
+  TODO
+  """
+  def start_child(pool, child_spec, opts \\ []) when is_atom(pool) and is_list(opts) do
+    FLAME.Pool.start_child(pool, child_spec, opts)
   end
 end

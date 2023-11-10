@@ -1,14 +1,14 @@
-defmodule Dragonfly.Pool.RunnerState do
+defmodule FLAME.Pool.RunnerState do
   defstruct count: nil, pid: nil, monitor_ref: nil
 end
 
-defmodule Dragonfly.Pool.WaitingState do
+defmodule FLAME.Pool.WaitingState do
   defstruct from: nil, monitor_ref: nil
 end
 
-defmodule Dragonfly.Pool do
+defmodule FLAME.Pool do
   @moduledoc """
-  Manages a pool of `Dragonfly.Runner`'s.
+  Manages a pool of `FLAME.Runner`'s.
 
   Pools support elastic growth and shrinking of the number of runners.
 
@@ -16,7 +16,7 @@ defmodule Dragonfly.Pool do
 
       children = [
         ...,
-        {Dragonfly.Pool, name: MyRunner, min: 1, max: 10, max_concurrency: 100}
+        {FLAME.Pool, name: MyRunner, min: 1, max: 10, max_concurrency: 100}
       ]
 
   See `start_link/1` for supported options.
@@ -29,8 +29,8 @@ defmodule Dragonfly.Pool do
   """
   use GenServer
 
-  alias Dragonfly.{Pool, Runner}
-  alias Dragonfly.Pool.{RunnerState, WaitingState}
+  alias FLAME.{Pool, Runner}
+  alias FLAME.Pool.{RunnerState, WaitingState}
 
   @default_max_concurrency 100
   @boot_timeout 30_000
@@ -39,6 +39,7 @@ defmodule Dragonfly.Pool do
   defstruct name: nil,
             dynamic_sup: nil,
             terminator_sup: nil,
+            child_placement_sup: nil,
             boot_timeout: nil,
             idle_shutdown_after: nil,
             min: nil,
@@ -52,7 +53,7 @@ defmodule Dragonfly.Pool do
   def child_spec(opts) do
     %{
       id: {__MODULE__, Keyword.fetch!(opts, :name)},
-      start: {Dragonfly.Pool.Supervisor, :start_link, [opts]},
+      start: {FLAME.Pool.Supervisor, :start_link, [opts]},
       type: :supervisor
     }
   end
@@ -77,12 +78,12 @@ defmodule Dragonfly.Pool do
       Defaults `false`.
 
     * `:backend` - The backend to use. Defaults to the configured `:dragonfly, :backend` or
-      `Dragonfly.LocalBackend` if not configured.
+      `FLAME.LocalBackend` if not configured.
 
     * `:log` - The log level to use for verbose logging. Defaults to `false`.
 
     * `:timeout` - The time to allow functions to execute on a remote node. Defaults to 30 seconds.
-      This value is also used as the default `Dragonfly.call/3` timeout for the caller.
+      This value is also used as the default `FLAME.call/3` timeout for the caller.
     * `:boot_timeout` - The time to allow for booting and connecting to a remote node.
       Defaults to 30 seconds.
 
@@ -100,6 +101,7 @@ defmodule Dragonfly.Pool do
       :name,
       :dynamic_sup,
       :terminator_sup,
+      :child_placement_sup,
       :idle_shutdown_after,
       :min,
       :max,
@@ -116,14 +118,14 @@ defmodule Dragonfly.Pool do
   end
 
   @doc """
-  Calls a function in a remote runner for the given `Dragonfly.Pool`.
+  Calls a function in a remote runner for the given `FLAME.Pool`.
 
-  See `Dragonfly.call/3` for more information.
+  See `FLAME.call/3` for more information.
   """
   def call(name, func, opts \\ []) do
     opts = Keyword.put_new_lazy(opts, :timeout, fn -> lookup_boot_timeout(name) end)
 
-    {{ref, runner_pid}, opts} =
+    {{ref, _term_dyn_sup, runner_pid}, opts} =
       with_elapsed_timeout(opts, fn -> GenServer.call(name, :checkout, opts[:timeout]) end)
 
     result = Runner.call(runner_pid, func, opts[:timeout])
@@ -132,13 +134,13 @@ defmodule Dragonfly.Pool do
   end
 
   @doc """
-  Casts a function to a remote runner for the given `Dragonfly.Pool`.
+  Casts a function to a remote runner for the given `FLAME.Pool`.
 
-  See `Dragonfly.cast/2` for more information.
+  See `FLAME.cast/2` for more information.
   """
   def cast(name, func) do
     boot_timeout = lookup_boot_timeout(name)
-    {ref, runner_pid} = GenServer.call(name, :checkout, boot_timeout)
+    {ref, _term_dyn_sup, runner_pid} = GenServer.call(name, :checkout, boot_timeout)
 
     :ok = Runner.cast(runner_pid, func)
     :ok = GenServer.call(name, {:checkin, ref})
@@ -159,6 +161,20 @@ defmodule Dragonfly.Pool do
     {result, opts}
   end
 
+  @doc """
+  TODO
+
+  See `FLAME.start_child/3` for more information.
+  """
+  def start_child(name, _child_spec, _opts) do
+    boot_timeout = lookup_boot_timeout(name)
+    {ref, _term_dyn_sup, _runner_pid} = GenServer.call(name, :checkout, boot_timeout)
+
+    raise "TODO"
+    :ok = GenServer.call(name, {:checkin, ref})
+  end
+
+
   defp lookup_boot_timeout(name) do
     :ets.lookup_element(name, :boot_timeout, 2)
   end
@@ -170,12 +186,13 @@ defmodule Dragonfly.Pool do
     :ets.new(name, [:set, :public, :named_table, read_concurrency: true])
     :ets.insert(name, {:boot_timeout, boot_timeout})
     terminator_sup = Keyword.fetch!(opts, :terminator_sup)
+    child_placement_sup = Keyword.fetch!(opts, :child_placement_sup)
     runner_opts = runner_opts(opts, terminator_sup)
     min = Keyword.fetch!(opts, :min)
 
     # we must avoid recursively booting remote runners if we are a child
     min =
-      if Dragonfly.Parent.get() do
+      if FLAME.Parent.get() do
         0
       else
         min
@@ -184,6 +201,7 @@ defmodule Dragonfly.Pool do
     state = %Pool{
       dynamic_sup: Keyword.fetch!(opts, :dynamic_sup),
       terminator_sup: terminator_sup,
+      child_placement_sup: child_placement_sup,
       name: name,
       min: min,
       max: Keyword.fetch!(opts, :max),
@@ -221,7 +239,7 @@ defmodule Dragonfly.Pool do
         Keyword.update!(runner_opts, :backend, {backend, defaults})
 
       :error ->
-        backend = Dragonfly.Backend.impl()
+        backend = FLAME.Backend.impl()
         backend_opts = Application.get_env(:dragonfly, backend) || []
         Keyword.put(runner_opts, :backend, {backend, Keyword.merge(backend_opts, defaults)})
     end
@@ -292,7 +310,7 @@ defmodule Dragonfly.Pool do
         Process.monitor(from_pid)
       end
 
-    GenServer.reply(from, {ref, runner.pid})
+    GenServer.reply(from, {ref, state.child_placement_sup, runner.pid})
     new_state = %Pool{state | callers: Map.put(state.callers, ref, {from, runner.monitor_ref})}
     inc_runner_count(new_state, runner.monitor_ref)
   end
@@ -327,7 +345,7 @@ defmodule Dragonfly.Pool do
 
     spec = %{
       id: name,
-      start: {Dragonfly.Runner, :start_link, [opts]},
+      start: {FLAME.Runner, :start_link, [opts]},
       restart: :temporary
     }
 

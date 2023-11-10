@@ -1,15 +1,15 @@
-defmodule Dragonfly.FlyBackend do
+defmodule FLAME.FlyBackend do
   @moduledoc """
-  The `Dragonfly.Backend` using [Fly.io](https://fly.io) machines.
+  The `FLAME.Backend` using [Fly.io](https://fly.io) machines.
 
   The only required configuration is telling Dragonly to use the
-  `Dragonfly.FlyBackend` by default and the `:token` which is your Fly.io API
+  `FLAME.FlyBackend` by default and the `:token` which is your Fly.io API
   token. These can be set via application configuration in your `config/runtime.exs`
   withing a `:prod` block:
 
       if config_env() == :prod do
-        config :dragonfly, :backend, Dragonfly.FlyBackend
-        config :dragonfly, Dragonfly.FlyBackend, token: System.fetch_env!("FLY_API_TOKEN")
+        config :flame, :backend, FLAME.FlyBackend
+        config :flame, FLAME.FlyBackend, token: System.fetch_env!("FLY_API_TOKEN")
         ...
       end
 
@@ -19,9 +19,9 @@ defmodule Dragonfly.FlyBackend do
   $ fly secrets set FLY_API_TOKEN="$(fly auth token)"
   ```
   """
-  @behaviour Dragonfly.Backend
+  @behaviour FLAME.Backend
 
-  alias Dragonfly.FlyBackend
+  alias FLAME.FlyBackend
 
   require Logger
 
@@ -59,7 +59,7 @@ defmodule Dragonfly.FlyBackend do
   @impl true
   def init(opts) do
     :global_group.monitor_nodes(true)
-    conf = Enum.into(Application.get_env(:dragonfly, __MODULE__) || [], %{})
+    conf = Enum.into(Application.get_env(:flame, __MODULE__) || [], %{})
     [node_base | ip] = node() |> to_string() |> String.split("@")
 
     default = %FlyBackend{
@@ -87,8 +87,8 @@ defmodule Dragonfly.FlyBackend do
 
     encoded_parent =
       parent_ref
-      |> Dragonfly.Parent.new(self(), __MODULE__)
-      |> Dragonfly.Parent.encode()
+      |> FLAME.Parent.new(self(), __MODULE__)
+      |> FLAME.Parent.encode()
 
     new_env =
       Map.merge(
@@ -138,9 +138,9 @@ defmodule Dragonfly.FlyBackend do
           connect_options: [timeout: state.boot_timeout],
           retry: false,
           auth: {:bearer, state.token},
-          headers: %{"dragonfly-parent-ip" => "#{state.local_ip}"},
+          headers: %{"flame-parent-ip" => "#{state.local_ip}"},
           json: %{
-            name: "#{state.app}-dragonfly-#{rand_id(20)}",
+            name: "#{state.app}-flame-#{rand_id(20)}",
             config: %{
               image: state.image,
               size: state.size,

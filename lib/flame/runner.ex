@@ -1,29 +1,29 @@
-defmodule Dragonfly.Runner do
+defmodule FLAME.Runner do
   @moduledoc false
   # ## Runners
 
-  # In practice, users will utilize the `Dragonfly.call/3` and `Dragonfly.cast/3` functions
-  # to accomplish their work. These functions are backed by a `Dragonfly.Pool` of
-  # `Dragonfly.Runner`'s
+  # In practice, users will utilize the `FLAME.call/3` and `FLAME.cast/3` functions
+  # to accomplish their work. These functions are backed by a `FLAME.Pool` of
+  # `FLAME.Runner`'s
   #
-  # A `Dragonfly.Runner` is responsible for booting a new node, and executing concurrent
+  # A `FLAME.Runner` is responsible for booting a new node, and executing concurrent
   # functions on it. For example:
   #
-  #     {:ok, runner} = Runner.start_link(backend: Dragonfly.FlyBackend)
+  #     {:ok, runner} = Runner.start_link(backend: FLAME.FlyBackend)
   #     :ok = Runner.remote_boot(runner)
   #     Runner.call(runner, fn -> :operation1 end)
   #     Runner.cast(runner, fn -> :operation2 end)
   #     Runner.shutdown(runner)
   #
   # When a caller exits or crashes, the remote node will automatically be terminated.
-  # For distributed erlang backends, like `Dragonfly.FlyBackend`, this will be
-  # accomplished automatically by the `Dragonfly.Terminator`, but other methods
+  # For distributed erlang backends, like `FLAME.FlyBackend`, this will be
+  # accomplished automatically by the `FLAME.Terminator`, but other methods
   # are possible.
 
   use GenServer
   require Logger
 
-  alias Dragonfly.Runner
+  alias FLAME.Runner
 
   @derive {Inspect,
            only: [
@@ -63,7 +63,7 @@ defmodule Dragonfly.Runner do
 
   ## Examples
 
-      iex> Dragonfly.Runner.start_link()
+      iex> FLAME.Runner.start_link()
       {:ok, pid}
   """
   def start_link(opts \\ []) do
@@ -79,10 +79,10 @@ defmodule Dragonfly.Runner do
 
   ## Examples
 
-      iex> {:ok, pid} = Dragonfly.Runner.start_link(...)
+      iex> {:ok, pid} = FLAME.Runner.start_link(...)
       {:ok, pid}
 
-      iex> Dragonfly.Runner.remote_boot(pid)
+      iex> FLAME.Runner.remote_boot(pid)
       :ok
   """
   def remote_boot(pid, timeout \\ nil) when is_pid(pid) do
@@ -99,7 +99,7 @@ defmodule Dragonfly.Runner do
 
     result =
       remote_call(runner, backend_state, call_timeout, fn ->
-        :ok = Dragonfly.Terminator.deadline_me(terminator, call_timeout, single?)
+        :ok = FLAME.Terminator.deadline_me(terminator, call_timeout, single?)
         func.()
       end)
 
@@ -131,7 +131,7 @@ defmodule Dragonfly.Runner do
     {:ok, {_remote_pid, _remote_monitor_ref}} =
       backend.remote_spawn_monitor(backend_state, fn ->
         # This runs on the remote node
-        :ok = Dragonfly.Terminator.deadline_me(terminator, timeout, single_use)
+        :ok = FLAME.Terminator.deadline_me(terminator, timeout, single_use)
         func.()
       end)
 
@@ -228,7 +228,7 @@ defmodule Dragonfly.Runner do
 
     {:ok, {remote_pid, remote_monitor_ref}} =
       runner.backend.remote_spawn_monitor(state.backend_state, fn ->
-        :ok = Dragonfly.Terminator.system_shutdown(terminator)
+        :ok = FLAME.Terminator.system_shutdown(terminator)
         send(parent, {ref, :ok})
       end)
 
@@ -278,7 +278,7 @@ defmodule Dragonfly.Runner do
                 remote_call!(runner, new_backend_state, runner.boot_timeout, fn ->
                   # ensure app is fully started if parent connects before up
                   if otp_app, do: {:ok, _} = Application.ensure_all_started(otp_app)
-                  :ok = Dragonfly.Terminator.schedule_idle_shutdown(term, idle_after, idle_check)
+                  :ok = FLAME.Terminator.schedule_idle_shutdown(term, idle_after, idle_check)
                 end)
 
               {:reply, :ok, new_state}
@@ -333,7 +333,7 @@ defmodule Dragonfly.Runner do
     {backend, backend_init} =
       case Keyword.fetch!(opts, :backend) do
         backend when is_atom(backend) ->
-          opts = Application.get_env(:dragonfly, backend) || []
+          opts = Application.get_env(:flame, backend) || []
           {backend, backend.init(opts)}
 
         {backend, opts} when is_atom(backend) and is_list(opts) ->

@@ -1,11 +1,11 @@
-defmodule Dragonfly.LocalBackend do
+defmodule FLAME.LocalBackend do
   @moduledoc false
-  @behaviour Dragonfly.Backend
+  @behaviour FLAME.Backend
 
   @impl true
   def init(opts) do
     defaults =
-      Application.get_env(:dragonfly, __MODULE__) || []
+      Application.get_env(:flame, __MODULE__) || []
 
     _terminator_sup = Keyword.fetch!(opts, :terminator_sup)
 
@@ -37,12 +37,12 @@ defmodule Dragonfly.LocalBackend do
 
   @impl true
   def remote_boot(state) do
-    parent = Dragonfly.Parent.new(make_ref(), self(), __MODULE__)
+    parent = FLAME.Parent.new(make_ref(), self(), __MODULE__)
     opts = [parent: parent, log: state.log]
 
     spec = %{
-      id: Dragonfly.Terminator,
-      start: {Dragonfly.Terminator, :start_link, [opts]},
+      id: FLAME.Terminator,
+      start: {FLAME.Terminator, :start_link, [opts]},
       restart: :temporary,
       type: :worker
     }

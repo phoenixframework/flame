@@ -1,4 +1,4 @@
-defmodule Dragonfly.Application do
+defmodule FLAME.Application do
   @moduledoc false
 
   use Application
@@ -6,15 +6,16 @@ defmodule Dragonfly.Application do
   @impl true
   def start(_type, _args) do
     {shutdown_timeout, opts} =
-      :dragonfly
+      :flame
       |> Application.get_env(:terminator, [])
       |> Keyword.pop(:shutdown_timeout, 30_000)
 
     children = [
-      Supervisor.child_spec({Dragonfly.Terminator, opts}, shutdown: shutdown_timeout)
+      {DynamicSupervisor, name: FLAME.ChildPlacementSup, strategy: :one_for_one},
+      Supervisor.child_spec({FLAME.Terminator, opts}, shutdown: shutdown_timeout)
     ]
 
-    opts = [strategy: :one_for_one, name: Dragonfly.Supervisor]
+    opts = [strategy: :one_for_one, name: FLAME.Supervisor]
     Supervisor.start_link(children, opts)
   end
 end
