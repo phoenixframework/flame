@@ -13,7 +13,7 @@ defmodule FLAME.Runner.MixProject do
       source_url: "https://github.com/phoenixframework/flame",
       homepage_url: "http://www.phoenixframework.org",
       description: """
-      Remote empheral application process runner.
+      Fleeting Lambda Application for Modular Execution.
       """
     ]
   end
