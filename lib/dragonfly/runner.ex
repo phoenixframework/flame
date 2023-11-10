@@ -309,6 +309,7 @@ defmodule Dragonfly.Runner do
 
     {idle_shutdown_after_ms, idle_check} =
       case Keyword.fetch(opts, :idle_shutdown_after) do
+        {:ok, :infinity} -> {:infinity, fn -> false end}
         {:ok, ms} when is_integer(ms) -> {ms, fn -> true end}
         {:ok, {ms, func}} when is_integer(ms) and is_function(func, 0) -> {ms, func}
         other when other in [{:ok, nil}, :error] -> {30_000, fn -> true end}

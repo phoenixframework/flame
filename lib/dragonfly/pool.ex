@@ -110,7 +110,9 @@ defmodule Dragonfly.Pool do
   end
 
   @doc """
-  TODO
+  Calls a function in a remote runner for the given `Dragonfly.Pool`.
+
+  See `Dragonfly.call/3` for more information.
   """
   def call(name, func, opts \\ []) do
     opts = Keyword.put_new_lazy(opts, :timeout, fn -> lookup_boot_timeout(name) end)
@@ -123,7 +125,9 @@ defmodule Dragonfly.Pool do
   end
 
   @doc """
-  TODO
+  Casts a function to a remote runner for the given `Dragonfly.Pool`.
+
+  See `Dragonfly.cast/2` for more information.
   """
   def cast(name, func) do
     boot_timeout = lookup_boot_timeout(name)
@@ -297,7 +301,7 @@ defmodule Dragonfly.Pool do
     if state.min > 0 do
       # start min runners, and do not idle them down regardless of idle configuration
       0..(state.min - 1)
-      |> Task.async_stream(fn _ -> start_child_runner(state, idle_shutdown_after: nil) end,
+      |> Task.async_stream(fn _ -> start_child_runner(state, idle_shutdown_after: :infinity) end,
         max_concurrency: 10,
         timeout: state.boot_timeout
       )

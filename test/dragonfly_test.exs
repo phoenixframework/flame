@@ -77,4 +77,29 @@ defmodule Dragonfly.DragonflyTest do
     assert [{:undefined, ^runner1, :worker, [Dragonfly.Runner]}] =
              Supervisor.which_children(dyn_sup)
   end
+
+  describe "cast" do
+    @tag runner: [min: 1, max: 2, max_concurrency: 2, idle_shutdown_after: 500]
+    test "normal execution", %{} = config do
+      sim_long_running(config.test, 100)
+      parent = self()
+      assert Dragonfly.cast(config.test, fn -> send(parent, {:ran, self()}) end) == :ok
+      assert_receive {:ran, cast_pid}
+      Process.monitor(cast_pid)
+      assert_receive {:DOWN, _ref, :process, ^cast_pid, :normal}
+    end
+
+    @tag runner: [min: 1, max: 2, max_concurrency: 2, idle_shutdown_after: 500]
+    test "with exit", %{} = config do
+      sim_long_running(config.test, 100)
+      parent = self()
+      assert Dragonfly.cast(config.test, fn ->
+        send(parent, {:ran, self()})
+        exit(:boom)
+      end) == :ok
+      assert_receive {:ran, cast_pid}
+      Process.monitor(cast_pid)
+      assert_receive {:DOWN, _ref, :process, ^cast_pid, :boom}
+    end
+  end
 end
