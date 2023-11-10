@@ -196,31 +196,8 @@ defmodule Dragonfly do
 
   @doc """
   Casts a function to a remote runner for the given `Dragonfly.Pool`.
-
-  ## Options
-
-    * `:timeout` - The timeout the caller is willing to wait for a response before an
-      exit with `:timeout`. Defaults to the configured timeout of the pool.
-      The executed function will also be terminated on the remote dragonfly if
-      the timeout is reached.
-
-  ## Examples
-
-    def my_expensive_thing(arg) do
-      Dragonfly.call(MyApp.Runner, fn ->
-        # i'm now doing expensive work inside a new node
-        # pubsub and repo access all just work
-        Phoenix.PubSub.broadcast(MyApp.PubSub, "topic", result)
-
-        # can return awaitable results back to caller
-        result
-      end)
-
-  When the caller exits, the remote runner will be terminated.
   """
   def cast(pool, func) when is_atom(pool) and is_function(func, 0) do
     Dragonfly.Pool.cast(pool, func)
   end
-
-
 end
