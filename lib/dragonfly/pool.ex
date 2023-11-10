@@ -122,6 +122,18 @@ defmodule Dragonfly.Pool do
     result
   end
 
+  @doc """
+  TODO
+  """
+  def cast(name, func) do
+    boot_timeout = lookup_boot_timeout(name)
+    {ref, runner_pid} = GenServer.call(name, :checkout, boot_timeout)
+
+    :ok = Runner.cast(runner_pid, func)
+    :ok = GenServer.call(name, {:checkin, ref})
+  end
+
+
   defp with_elapsed_timeout(opts, func) do
     {micro, result} = :timer.tc(func)
     elapsed_ms = div(micro, 1000)

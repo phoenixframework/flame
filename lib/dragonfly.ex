@@ -78,9 +78,21 @@ defmodule Dragonfly do
       Dragonfly.call(App.FFMpegRunner, fn -> :operation1 end)
 
   You'll also often want to enable or disable other application services based on whether
-  your application is being started as child Dragonfly runner or being run directly. You
-  can use `Dragonfly.Parent.get/0` to conditionally enable or disable processes in your
-  `applicaiton.ex` file:
+  your application is being started as child Dragonfly runner or being run directly.
+  See the next `Deployment Considerations` section below for details.
+
+  ## Deployment Considerations
+
+  Dragonfly nodes effectively clone and start your entire application. This is great
+  because all application services and dependencies are ready to go and be used to
+  support your Dragonfly calls; however, You'll also often want to enable or disable
+  services based on whether your node is running as a Dragonfly child or not.
+  For example, there's usually no need to serve your Phoenix endpoint within a Dragonfly.
+  You also likely only need a single or small number of database connections instead of
+  your existing pool size.
+
+  To accomplish these you can use `Dragonfly.Parent.get/0` to conditionally enable or
+  disable processes in you `applicaiton.ex` file:
 
       def start(_type, _args) do
         dragonfly_parent = Dragonfly.Parent.get()
@@ -104,6 +116,19 @@ defmodule Dragonfly do
   Here we filter the phoenix endpoint from being started when running as a Dragonfly
   child because we have no need to handle web requests in this case.
 
+  Or you can use `Dragonfly.Parent.get/0` to configure your database pool size:
+
+      pool_size =
+        if Dragonfly.Parent.get() do
+          1
+        else
+          String.to_integer(System.get_env("POOL_SIZE") || "10")
+        end
+
+      config :thumbs, Thumbs.Repo,
+        ...,
+        pool_size: pool_size
+
   ## Backends
 
   The `Dragonfly.Backend` behavior defines an interface for spawning remote
@@ -125,6 +150,15 @@ defmodule Dragonfly do
         config :dragonfly, Dragonfly.FlyBackend, token: System.fetch_env!("FLY_API_TOKEN")
         ...
       end
+
+  ## Termination
+
+  Dragonfly runs a termination process to allow remoately spawned functions time to
+  complete before the node is terminated. This process is started automatically
+  with the library. The shutdown timeout by default is 30s, but can be configured
+  in your application configuration, such as `config/runtime.exs`:
+
+      config :dragonfly, :terminator, shutdown_timeout: :timer.seconds(10)
   """
   require Logger
 

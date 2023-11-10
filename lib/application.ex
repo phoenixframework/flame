@@ -5,10 +5,13 @@ defmodule Dragonfly.Application do
 
   @impl true
   def start(_type, _args) do
-    terminator_opts = Application.get_env(:dragonfly, :terminator) || []
+    {shutdown_timeout, opts} =
+      :dragonfly
+      |> Application.get_env(:terminator, [])
+      |> Keyword.pop(:shutdown_timeout, 30_000)
 
     children = [
-      {Dragonfly.Terminator, terminator_opts}
+      Supervisor.child_spec({Dragonfly.Terminator, opts}, shutdown: shutdown_timeout)
     ]
 
     opts = [strategy: :one_for_one, name: Dragonfly.Supervisor]

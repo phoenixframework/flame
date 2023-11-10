@@ -60,7 +60,7 @@ defmodule Dragonfly.FlyBackend do
   def init(opts) do
     :global_group.monitor_nodes(true)
     conf = Enum.into(Application.get_env(:dragonfly, __MODULE__) || [], %{})
-    [node_base | _] = node() |> to_string() |> String.split("@")
+    [node_base | ip] = node() |> to_string() |> String.split("@")
 
     default = %FlyBackend{
       app: System.get_env("FLY_APP_NAME"),
@@ -95,8 +95,6 @@ defmodule Dragonfly.FlyBackend do
         %{PHX_SERVER: "false", DRAGONFLY_PARENT: encoded_parent},
         state.env
       )
-
-    [_, ip] = node() |> Atom.to_string() |> String.split("@")
 
     new_state =
       %FlyBackend{state | env: new_env, parent_ref: parent_ref, local_ip: ip}

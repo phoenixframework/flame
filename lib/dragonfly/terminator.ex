@@ -24,8 +24,7 @@ defmodule Dragonfly.Terminator do
   alias Dragonfly.{Terminator, Parent}
   alias Dragonfly.Terminator.Caller
 
-  defstruct shutdown_timeout: nil,
-            parent: nil,
+  defstruct parent: nil,
             parent_monitor_ref: nil,
             calls: %{},
             log: false,
@@ -47,16 +46,13 @@ defmodule Dragonfly.Terminator do
     * `:parent` – The `%Dragonfly.Parent{}` of the parent runner.
       Defaults to lookup from `Dragonfly.Parent.get/0`.
 
-    * `:shutdown_timeout` - The time to wait for existing RPC calls to finish
-      before shutting down the system. Defaults to 20 seconds.
-
     * `:failsafe_timeout` - The time to wait for a connection to the parent node
       before shutting down the system. Defaults to 2 seconds.
 
     * `:log` - The optional logging level. Defaults `false`.
   """
   def start_link(opts) do
-    Keyword.validate!(opts, [:name, :parent, :shutdown_timeout, :failsafe_timeout, :log])
+    Keyword.validate!(opts, [:name, :parent, :failsafe_timeout, :log])
 
     GenServer.start_link(__MODULE__, opts, name: opts[:name])
   end
@@ -76,7 +72,6 @@ defmodule Dragonfly.Terminator do
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
-    timeout = Keyword.get(opts, :shutdown_timeout, 20_000)
     failsafe_timeout = Keyword.get(opts, :failsafe_timeout, 20_000)
     log = Keyword.get(opts, :log, false)
 
@@ -91,7 +86,6 @@ defmodule Dragonfly.Terminator do
 
         state = %Terminator{
           status: :connecting,
-          shutdown_timeout: timeout,
           parent: parent,
           calls: %{},
           log: log,
@@ -191,12 +185,10 @@ defmodule Dragonfly.Terminator do
     if map_size(state.calls) == 0 do
       :ok
     else
-      Process.send_after(self(), :shutdown_timeout, state.shutdown_timeout)
-
+      # supervisor will force kill us if we take longer than configured shutdown_timeout
       Enum.each(state.calls, fn {ref, %Caller{}} ->
         receive do
           {:DOWN, ^ref, :process, _pid, _reason} -> :ok
-          :shutdown_timeout -> :ok
         end
       end)
     end
