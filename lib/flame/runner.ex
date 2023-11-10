@@ -23,7 +23,7 @@ defmodule FLAME.Runner do
   use GenServer
   require Logger
 
-  alias FLAME.Runner
+  alias FLAME.{Runner, Terminator}
 
   @derive {Inspect,
            only: [
@@ -94,12 +94,12 @@ defmodule FLAME.Runner do
   """
   def call(runner_pid, func, timeout \\ nil) when is_pid(runner_pid) and is_function(func, 0) do
     {ref, %Runner{} = runner, backend_state} = checkout(runner_pid)
-    %Runner{terminator: terminator, single_use: single?} = runner
+    %Runner{terminator: terminator} = runner
     call_timeout = timeout || runner.timeout
 
     result =
       remote_call(runner, backend_state, call_timeout, fn ->
-        :ok = FLAME.Terminator.deadline_me(terminator, call_timeout, single?)
+        :ok = Terminator.deadline_me(terminator, call_timeout)
         func.()
       end)
 
@@ -125,13 +125,13 @@ defmodule FLAME.Runner do
   def cast(runner_pid, func) when is_pid(runner_pid) and is_function(func, 0) do
     {ref, runner, backend_state} = checkout(runner_pid)
 
-    %Runner{single_use: single_use, backend: backend, timeout: timeout, terminator: terminator} =
+    %Runner{backend: backend, timeout: timeout, terminator: terminator} =
       runner
 
     {:ok, {_remote_pid, _remote_monitor_ref}} =
       backend.remote_spawn_monitor(backend_state, fn ->
         # This runs on the remote node
-        :ok = FLAME.Terminator.deadline_me(terminator, timeout, single_use)
+        :ok = Terminator.deadline_me(terminator, timeout)
         func.()
       end)
 
@@ -228,7 +228,7 @@ defmodule FLAME.Runner do
 
     {:ok, {remote_pid, remote_monitor_ref}} =
       runner.backend.remote_spawn_monitor(state.backend_state, fn ->
-        :ok = FLAME.Terminator.system_shutdown(terminator)
+        :ok = Terminator.system_shutdown(terminator)
         send(parent, {ref, :ok})
       end)
 
@@ -269,6 +269,7 @@ defmodule FLAME.Runner do
               new_state = %{state | runner: new_runner, backend_state: new_backend_state}
 
               %Runner{
+                single_use: single_use,
                 idle_shutdown_after: idle_after,
                 idle_shutdown_check: idle_check,
                 terminator: term
@@ -278,7 +279,9 @@ defmodule FLAME.Runner do
                 remote_call!(runner, new_backend_state, runner.boot_timeout, fn ->
                   # ensure app is fully started if parent connects before up
                   if otp_app, do: {:ok, _} = Application.ensure_all_started(otp_app)
-                  :ok = FLAME.Terminator.schedule_idle_shutdown(term, idle_after, idle_check)
+
+                  :ok =
+                    Terminator.schedule_idle_shutdown(term, idle_after, idle_check, single_use)
                 end)
 
               {:reply, :ok, new_state}

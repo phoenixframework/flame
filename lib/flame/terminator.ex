@@ -1,5 +1,5 @@
 defmodule FLAME.Terminator.Caller do
-  defstruct from_pid: nil, timer: nil, single_use?: false
+  defstruct from_pid: nil, timer: nil
 end
 
 defmodule FLAME.Terminator do
@@ -26,6 +26,7 @@ defmodule FLAME.Terminator do
 
   defstruct parent: nil,
             parent_monitor_ref: nil,
+            single_use: false,
             calls: %{},
             log: false,
             status: nil,
@@ -57,12 +58,12 @@ defmodule FLAME.Terminator do
     GenServer.start_link(__MODULE__, opts, name: opts[:name])
   end
 
-  def deadline_me(terminator, timeout, single_use?) when is_boolean(single_use?) do
-    GenServer.call(terminator, {:deadline, timeout, single_use?})
+  def deadline_me(terminator, timeout) do
+    GenServer.call(terminator, {:deadline, timeout})
   end
 
-  def schedule_idle_shutdown(terminator, idle_shutdown, idle_check) do
-    GenServer.call(terminator, {:schedule_idle_shutdown, idle_shutdown, idle_check})
+  def schedule_idle_shutdown(terminator, idle_shutdown, idle_check, single_use?) do
+    GenServer.call(terminator, {:schedule_idle_shutdown, idle_shutdown, idle_check, single_use?})
   end
 
   def system_shutdown(terminator) when is_pid(terminator) do
@@ -169,7 +170,7 @@ defmodule FLAME.Terminator do
   @impl true
   def handle_call({:place_child, _spec}, {from_pid, _tag}, %Terminator{} = state) do
     raise "TODO"
-    {:reply, :ok, deadline_caller(state, from_pid, :infinity, _single_use? = false)}
+    {:reply, :ok, deadline_caller(state, from_pid, :infinity)}
   end
 
   def handle_call(:system_shutdown, _from, %Terminator{} = state) do
@@ -177,14 +178,19 @@ defmodule FLAME.Terminator do
      system_stop(state, "system shutdown instructed from parent #{inspect(state.parent.pid)}")}
   end
 
-  def handle_call({:deadline, timeout, single_use?}, {from_pid, _tag}, %Terminator{} = state) do
-    {:reply, :ok, deadline_caller(state, from_pid, timeout, single_use?)}
+  def handle_call({:deadline, timeout}, {from_pid, _tag}, %Terminator{} = state) do
+    {:reply, :ok, deadline_caller(state, from_pid, timeout)}
   end
 
-  def handle_call({:schedule_idle_shutdown, idle_after, idle_check}, _from, %Terminator{} = state) do
+  def handle_call(
+        {:schedule_idle_shutdown, idle_after, idle_check, single_use?},
+        _from,
+        %Terminator{} = state
+      ) do
     new_state = %Terminator{
       state
-      | idle_shutdown_after: idle_after,
+      | single_use: single_use?,
+        idle_shutdown_after: idle_after,
         idle_shutdown_check: idle_check
     }
 
@@ -207,10 +213,9 @@ defmodule FLAME.Terminator do
     end
   end
 
-  defp deadline_caller(%Terminator{} = state, from_pid, timeout, single_use?)
+  defp deadline_caller(%Terminator{} = state, from_pid, timeout)
        when is_pid(from_pid) and
-              (is_integer(timeout) or timeout == :infinity) and
-              is_boolean(single_use?) do
+              (is_integer(timeout) or timeout == :infinity) do
     ref = Process.monitor(from_pid)
 
     timer =
@@ -219,7 +224,7 @@ defmodule FLAME.Terminator do
         ms when is_integer(ms) -> Process.send_after(self(), {:timeout, ref}, ms)
       end
 
-    caller = %Caller{from_pid: from_pid, timer: timer, single_use?: single_use?}
+    caller = %Caller{from_pid: from_pid, timer: timer}
     new_state = %Terminator{state | calls: Map.put(state.calls, ref, caller)}
     cancel_idle_shutdown(new_state)
   end
@@ -230,7 +235,7 @@ defmodule FLAME.Terminator do
     state = %Terminator{state | calls: Map.delete(state.calls, ref)}
 
     new_state =
-      if caller.single_use? do
+      if state.single_use do
         system_stop(state, "single use completed. Going down")
       else
         state
