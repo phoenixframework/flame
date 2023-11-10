@@ -20,6 +20,12 @@ defmodule Dragonfly.Pool do
       ]
 
   See `start_link/1` for supported options.
+
+  ## TODO
+
+  - interface to configure min/max at runtime
+  - callbacks for pool events so folks can hook into pool growth/shrinkage
+
   """
   use GenServer
 
@@ -116,6 +122,7 @@ defmodule Dragonfly.Pool do
   """
   def call(name, func, opts \\ []) do
     opts = Keyword.put_new_lazy(opts, :timeout, fn -> lookup_boot_timeout(name) end)
+
     {{ref, runner_pid}, opts} =
       with_elapsed_timeout(opts, fn -> GenServer.call(name, :checkout, opts[:timeout]) end)
 
@@ -136,7 +143,6 @@ defmodule Dragonfly.Pool do
     :ok = Runner.cast(runner_pid, func)
     :ok = GenServer.call(name, {:checkin, ref})
   end
-
 
   defp with_elapsed_timeout(opts, func) do
     {micro, result} = :timer.tc(func)
