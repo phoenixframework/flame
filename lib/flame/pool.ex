@@ -38,6 +38,7 @@ defmodule FLAME.Pool do
 
   defstruct name: nil,
             dynamic_sup: nil,
+            task_sup: nil,
             terminator_sup: nil,
             child_placement_sup: nil,
             boot_timeout: nil,
@@ -48,6 +49,7 @@ defmodule FLAME.Pool do
             callers: %{},
             waiting: [],
             runners: %{},
+            pending_runners: %{},
             runner_opts: []
 
   def child_spec(opts) do
@@ -100,6 +102,7 @@ defmodule FLAME.Pool do
     Keyword.validate!(opts, [
       :name,
       :dynamic_sup,
+      :task_sup,
       :terminator_sup,
       :child_placement_sup,
       :idle_shutdown_after,
@@ -122,10 +125,10 @@ defmodule FLAME.Pool do
 
   See `FLAME.call/3` for more information.
   """
-  def call(name, func, opts \\ []) do
+  def call(name, func, opts \\ []) when is_function(func, 0) and is_list(opts) do
     opts = Keyword.put_new_lazy(opts, :timeout, fn -> lookup_boot_timeout(name) end)
 
-    {{ref, _term_dyn_sup, runner_pid}, opts} =
+    {{ref, runner_pid}, opts} =
       with_elapsed_timeout(opts, fn -> GenServer.call(name, :checkout, opts[:timeout]) end)
 
     result = Runner.call(runner_pid, func, opts[:timeout])
@@ -138,9 +141,9 @@ defmodule FLAME.Pool do
 
   See `FLAME.cast/2` for more information.
   """
-  def cast(name, func) do
+  def cast(name, func) when is_function(func, 0) do
     boot_timeout = lookup_boot_timeout(name)
-    {ref, _term_dyn_sup, runner_pid} = GenServer.call(name, :checkout, boot_timeout)
+    {ref, runner_pid} = GenServer.call(name, :checkout, boot_timeout)
 
     :ok = Runner.cast(runner_pid, func)
     :ok = GenServer.call(name, {:checkin, ref})
@@ -164,16 +167,29 @@ defmodule FLAME.Pool do
   @doc """
   TODO
 
-  See `FLAME.start_child/3` for more information.
+  See `FLAME.place_child/3` for more information.
   """
-  def start_child(name, _child_spec, _opts) do
-    boot_timeout = lookup_boot_timeout(name)
-    {ref, _term_dyn_sup, _runner_pid} = GenServer.call(name, :checkout, boot_timeout)
+  def place_child(name, child_spec, opts) do
+    opts = Keyword.put_new_lazy(opts, :timeout, fn -> lookup_boot_timeout(name) end)
 
-    raise "TODO"
-    :ok = GenServer.call(name, {:checkin, ref})
+    {{ref, runner_pid}, opts} =
+      with_elapsed_timeout(opts, fn -> GenServer.call(name, :checkout, opts[:timeout]) end)
+
+    case Runner.place_child(runner_pid, child_spec, opts) do
+      {:ok, child_pid} ->
+        Process.link(child_pid)
+        :ok = GenServer.call(name, {:replace_checkin, ref, child_pid})
+        {:ok, child_pid}
+
+      :ignore ->
+        :ok = GenServer.call(name, {:checkin, ref})
+        :ignore
+
+      {:error, reason} ->
+        :ok = GenServer.call(name, {:checkin, ref})
+        {:error, reason}
+    end
   end
-
 
   defp lookup_boot_timeout(name) do
     :ets.lookup_element(name, :boot_timeout, 2)
@@ -200,6 +216,7 @@ defmodule FLAME.Pool do
 
     state = %Pool{
       dynamic_sup: Keyword.fetch!(opts, :dynamic_sup),
+      task_sup: Keyword.fetch!(opts, :task_sup),
       terminator_sup: terminator_sup,
       child_placement_sup: child_placement_sup,
       name: name,
@@ -250,13 +267,25 @@ defmodule FLAME.Pool do
     {:noreply, handle_down(state, msg)}
   end
 
+  def handle_info({ref, {:ok, pid}}, %Pool{} = state) when is_reference(ref) do
+    {:noreply, handle_runner_async_up(state, pid, ref)}
+  end
+
   @impl true
   def handle_call(:checkout, from, state) do
     {:noreply, checkout_runner(state, from)}
   end
 
+  def handle_call({:replace_checkin, ref, child_pid}, _from, state) do
+    {:reply, :ok, replace_caller(state, ref, child_pid)}
+  end
+
   def handle_call({:checkin, ref}, _from, state) do
     {:reply, :ok, checkin_runner(state, ref)}
+  end
+
+  defp runner_count(state) do
+    map_size(state.runners) + map_size(state.pending_runners)
   end
 
   defp min_runner(state) do
@@ -268,8 +297,22 @@ defmodule FLAME.Pool do
     end
   end
 
+  defp replace_caller(state, ref, child_pid) do
+    # replace caller with child pid and do not inc concurrency counts since we are replacing
+    %{^ref => {_caller_pid, runner_ref}} = state.callers
+    Process.demonitor(ref, [:flush])
+    new_ref = Process.monitor(child_pid)
+
+    new_callers =
+      state.callers
+      |> Map.delete(ref)
+      |> Map.put(new_ref, {child_pid, runner_ref})
+
+    %Pool{state | callers: new_callers}
+  end
+
   defp checkin_runner(state, ref) do
-    %{^ref => {_from, runner_ref}} = state.callers
+    %{^ref => {_caller_pid, runner_ref}} = state.callers
     Process.demonitor(ref, [:flush])
 
     drop_caller(state, ref, runner_ref)
@@ -277,19 +320,16 @@ defmodule FLAME.Pool do
 
   defp checkout_runner(%Pool{} = state, from, monitor_ref \\ nil) do
     min_runner = min_runner(state)
-    runner_count = map_size(state.runners)
+    runner_count = runner_count(state)
 
     cond do
       runner_count == 0 || (min_runner.count == state.max_concurrency && runner_count < state.max) ->
-        case start_child_runner(state) do
-          {:ok, %RunnerState{} = runner} ->
-            state
-            |> put_runner(runner)
-            |> reply_runner_checkout(runner, from, monitor_ref)
-
-          {:error, reason} ->
-            GenServer.reply(from, {:error, reason})
-            state
+        if map_size(state.pending_runners) > 0 do
+          waiting_in(state, from)
+        else
+          state
+          |> async_boot_runner()
+          |> waiting_in(from)
         end
 
       min_runner && min_runner.count < state.max_concurrency ->
@@ -302,16 +342,16 @@ defmodule FLAME.Pool do
 
   defp reply_runner_checkout(state, %RunnerState{} = runner, from, monitor_ref) do
     # we pass monitor_ref down from waiting so we don't need to remonitor if already monitoring
+    {from_pid, _tag} = from
     ref =
       if monitor_ref do
         monitor_ref
       else
-        {from_pid, _tag} = from
         Process.monitor(from_pid)
       end
 
-    GenServer.reply(from, {ref, state.child_placement_sup, runner.pid})
-    new_state = %Pool{state | callers: Map.put(state.callers, ref, {from, runner.monitor_ref})}
+    GenServer.reply(from, {ref, runner.pid})
+    new_state = %Pool{state | callers: Map.put(state.callers, ref, {from_pid, runner.monitor_ref})}
     inc_runner_count(new_state, runner.monitor_ref)
   end
 
@@ -324,23 +364,33 @@ defmodule FLAME.Pool do
   defp boot_runners(%Pool{} = state) do
     if state.min > 0 do
       # start min runners, and do not idle them down regardless of idle configuration
+      # TODO: allow % threshold of failed min's to continue startup?
       0..(state.min - 1)
       |> Task.async_stream(fn _ -> start_child_runner(state, idle_shutdown_after: :infinity) end,
         max_concurrency: 10,
         timeout: state.boot_timeout
       )
       |> Enum.reduce(state, fn
-        {:ok, {:ok, %RunnerState{} = runner}}, acc -> put_runner(acc, runner)
-        {:exit, reason}, _acc -> raise "failed to boot runner: #{inspect(reason)}"
+        {:ok, {:ok, pid}}, acc ->
+          {_runner, new_acc} = put_runner(acc, pid)
+          new_acc
+
+        {:exit, reason}, _acc ->
+          raise "failed to boot runner: #{inspect(reason)}"
       end)
     else
       state
     end
   end
 
+  defp async_boot_runner(%Pool{} = state) do
+    task = Task.Supervisor.async_nolink(state.task_sup, fn -> start_child_runner(state) end)
+    new_pending = Map.put(state.pending_runners, task.ref, true)
+    %Pool{state | pending_runners: new_pending}
+  end
+
   defp start_child_runner(%Pool{} = state, runner_opts \\ []) do
     opts = Keyword.merge(state.runner_opts, runner_opts)
-
     name = Module.concat(state.name, "Runner#{map_size(state.runners) + 1}")
 
     spec = %{
@@ -350,21 +400,22 @@ defmodule FLAME.Pool do
     }
 
     {:ok, pid} = DynamicSupervisor.start_child(state.dynamic_sup, spec)
-    ref = Process.monitor(pid)
 
     try do
-      :ok = Runner.remote_boot(pid)
-      runner = %RunnerState{count: 0, pid: pid, monitor_ref: ref}
-      {:ok, runner}
+      case Runner.remote_boot(pid) do
+        :ok -> {:ok, pid}
+        {:error, reason} -> {:error, reason}
+      end
     catch
-      {:exit, reason} ->
-        Process.demonitor(ref, [:flush])
-        {:error, {:exit, reason}}
+      {:exit, reason} -> {:error, {:exit, reason}}
     end
   end
 
-  defp put_runner(%Pool{} = state, %RunnerState{} = runner) do
-    %Pool{state | runners: Map.put(state.runners, runner.monitor_ref, runner)}
+  defp put_runner(%Pool{} = state, pid) when is_pid(pid) do
+    ref = Process.monitor(pid)
+    runner = %RunnerState{count: 0, pid: pid, monitor_ref: ref}
+    new_state = %Pool{state | runners: Map.put(state.runners, runner.monitor_ref, runner)}
+    {runner, new_state}
   end
 
   defp inc_runner_count(%Pool{} = state, ref) do
@@ -385,9 +436,22 @@ defmodule FLAME.Pool do
     %Pool{state | runners: new_runners}
   end
 
-  defp drop_child_runner(%Pool{} = state, ref) when is_reference(ref) do
-    Process.demonitor(ref, [:flush])
-    %Pool{state | runners: Map.delete(state.runners, ref)}
+  defp drop_child_runner(%Pool{} = state, runner_ref) when is_reference(runner_ref) do
+    %{^runner_ref => %RunnerState{}} = state.runners
+    Process.demonitor(runner_ref, [:flush])
+    # kill all callers that still had a checkout for this runner
+    new_state =
+      Enum.reduce(state.callers, state, fn
+        {caller_ref, {caller_pid, ^runner_ref}}, acc ->
+          Process.demonitor(caller_ref, [:flush])
+          Process.exit(caller_pid, :kill)
+          %Pool{acc | callers: Map.delete(acc.callers, caller_ref)}
+
+        {_caller_ref, {_caller_pid, _runner_ref}}, acc ->
+          acc
+      end)
+
+    %Pool{new_state | runners: Map.delete(new_state.runners, runner_ref)}
   end
 
   defp drop_caller(%Pool{} = state, caller_ref, runner_ref) do
@@ -398,17 +462,24 @@ defmodule FLAME.Pool do
     |> call_next_waiting_caller()
   end
 
-  defp call_next_waiting_caller(%Pool{} = state) do
+  defp pop_next_waiting_caller(%Pool{} = state) do
     # we flush DOWN's so we don't send a lease to a waiting caller that is already down
     new_state = flush_downs(state)
 
     case new_state.waiting do
-      [] ->
+      [] -> {nil, new_state}
+      [%WaitingState{} = first | rest] -> {first, %Pool{new_state | waiting: rest}}
+    end
+  end
+
+  defp call_next_waiting_caller(%Pool{} = state) do
+    case pop_next_waiting_caller(state) do
+      {nil, new_state} ->
         new_state
 
-      [%WaitingState{} = first | rest] ->
+      {%WaitingState{} = first, new_state} ->
         # checkout_runner will borrow already running monitor
-        checkout_runner(%Pool{new_state | waiting: rest}, first.from, first.monitor_ref)
+        checkout_runner(new_state, first.from, first.monitor_ref)
     end
   end
 
@@ -422,17 +493,35 @@ defmodule FLAME.Pool do
 
     state =
       case state.callers do
-        %{^ref => {_from, runner_ref}} ->
+        %{^ref => {_caller_pid, runner_ref}} ->
           drop_caller(state, ref, runner_ref)
 
         %{} ->
           state
       end
 
-    case state.runners do
-      %{^ref => _} -> drop_child_runner(state, ref)
+    state =
+      case state.runners do
+        %{^ref => _} -> drop_child_runner(state, ref)
+        %{} -> state
+      end
+
+    case state.pending_runners do
+      %{^ref => _} ->
+        state = %Pool{state | pending_runners: Map.delete(state.pending_runners, ref)}
+        # TODO: we may need to rate limit this to avoid many failed async boot attempts
+        if has_unmet_servicable_demand?(state) do
+          async_boot_runner(state)
+        else
+          state
+        end
+
       %{} -> state
     end
+  end
+
+  defp has_unmet_servicable_demand?(%Pool{} = state) do
+    Enum.count(state.waiting) > 0 and runner_count(state) < state.max
   end
 
   defp flush_downs(%Pool{} = state) do
@@ -443,6 +532,41 @@ defmodule FLAME.Pool do
         |> flush_downs()
     after
       0 -> state
+    end
+  end
+
+  defp handle_runner_async_up(%Pool{} = state, pid, ref) when is_pid(pid) and is_reference(ref) do
+    %{^ref => _} = state.pending_runners
+    Process.demonitor(ref, [:flush])
+
+    new_state = %Pool{state | pending_runners: Map.delete(state.pending_runners, ref)}
+    {runner, new_state} = put_runner(new_state, pid)
+
+    # pop waiting callers up to max_concurrency, but we must handle:
+    # 1. the case where we have no waiting callers
+    # 2. the case where we process a DOWN for the new runner as we pop DOWNs
+    #   looking for fresh waiting
+    # 3. if we still have waiting callers at the end, boot more runners if we have capacity
+    new_state =
+      Enum.reduce_while(1..state.max_concurrency, new_state, fn i, acc ->
+        with {:ok, %RunnerState{} = runner} <- Map.fetch(acc.runners, runner.monitor_ref),
+             true <- i <= acc.max_concurrency do
+          case pop_next_waiting_caller(acc) do
+            {%WaitingState{} = next, acc} ->
+              {:cont, reply_runner_checkout(acc, runner, next.from, next.monitor_ref)}
+
+            {nil, acc} ->
+              {:halt, acc}
+          end
+        else
+          _ -> {:halt, acc}
+        end
+      end)
+
+    if has_unmet_servicable_demand?(new_state) do
+      async_boot_runner(new_state)
+    else
+      new_state
     end
   end
 end

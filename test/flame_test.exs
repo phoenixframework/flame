@@ -78,6 +78,16 @@ defmodule FLAME.FLAMETest do
              Supervisor.which_children(dyn_sup)
   end
 
+  @tag runner: [min: 1, max: 1, max_concurrency: 2, idle_shutdown_after: 500]
+  test "pool runner DOWN exits any active checkouts", %{dyn_sup: dyn_sup} = config do
+    {:ok, active_checkout} = sim_long_running(config.test, 10_000)
+    Process.unlink(active_checkout)
+    Process.monitor(active_checkout)
+    assert [{:undefined, runner, :worker, [FLAME.Runner]}] = Supervisor.which_children(dyn_sup)
+    Process.exit(runner, :brutal_kill)
+    assert_receive {:DOWN, _ref, :process, ^active_checkout, :killed}
+  end
+
   describe "cast" do
     @tag runner: [min: 1, max: 2, max_concurrency: 2, idle_shutdown_after: 500]
     test "normal execution", %{} = config do

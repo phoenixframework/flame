@@ -89,10 +89,17 @@ defmodule FLAME.Runner do
     GenServer.call(pid, {:remote_boot, timeout}, timeout || :infinity)
   end
 
+  def place_child(runner_pid, child_spec, opts) when is_pid(runner_pid) and is_list(opts) do
+    caller = self()
+    call(runner_pid, fn terminator ->
+      Terminator.place_child(terminator, caller, child_spec)
+    end, opts[:timeout])
+  end
+
   @doc """
   TODO
   """
-  def call(runner_pid, func, timeout \\ nil) when is_pid(runner_pid) and is_function(func, 0) do
+  def call(runner_pid, func, timeout \\ nil) when is_pid(runner_pid) and is_function(func) do
     {ref, %Runner{} = runner, backend_state} = checkout(runner_pid)
     %Runner{terminator: terminator} = runner
     call_timeout = timeout || runner.timeout
@@ -100,7 +107,7 @@ defmodule FLAME.Runner do
     result =
       remote_call(runner, backend_state, call_timeout, fn ->
         :ok = Terminator.deadline_me(terminator, call_timeout)
-        func.()
+        if is_function(func, 1), do: func.(terminator), else: func.()
       end)
 
     case result do

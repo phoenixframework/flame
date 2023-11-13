@@ -204,7 +204,7 @@ defmodule FLAME do
   @doc """
   TODO
   """
-  def start_child(pool, child_spec, opts \\ []) when is_atom(pool) and is_list(opts) do
-    FLAME.Pool.start_child(pool, child_spec, opts)
+  def place_child(pool, child_spec, opts \\ []) when is_atom(pool) and is_list(opts) do
+    FLAME.Pool.place_child(pool, child_spec, opts)
   end
 end
