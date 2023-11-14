@@ -35,6 +35,7 @@ defmodule FLAME.Pool do
   @default_max_concurrency 100
   @boot_timeout 30_000
   @idle_shutdown_after 30_000
+  @async_boot_debounce 1_000
 
   defstruct name: nil,
             runner_sup: nil,
@@ -50,7 +51,11 @@ defmodule FLAME.Pool do
             waiting: [],
             runners: %{},
             pending_runners: %{},
-            runner_opts: []
+            runner_opts: [],
+            on_grow_start: nil,
+            on_grow_end: nil,
+            on_shrink: nil,
+            async_boot_timer: nil
 
   def child_spec(opts) do
     %{
@@ -97,6 +102,26 @@ defmodule FLAME.Pool do
       to check a spefici condition, for example:
 
           {10_000, fn -> Supervisor.which_children(MySup) == []}
+
+    * `:on_grow_start` - The optional function to be called when the pool starts booting a new
+      runner beyond the configured `:min`. The function receives a map with the following metadata:
+
+        * `:name` - The name of the pool
+        * `:count` - The number of runners the pool is attempting to grow to
+        * `:pid` - The pid of the async process that is booting the new runner
+
+     * `:on_grow_end` - The optional 2-arty function to be called when the pool growth process completes.
+      The 2-arity function receives either `:ok` or `{:exit, reason}`, and map with the following metadata:
+
+        * `:name` - The name of the pool
+        * `:count` - The number of runners the pool is now at
+        * `:pid` - The pid of the async process that attempted to boot the new runner
+
+    * `:on_shrink` - The optional function to be called when the pool shrinks.
+      The function receives a map with the following metadata:
+
+        * `:name` - The name of the pool
+        * `:count` - The number of runners the pool is attempting to shrink to
   """
   def start_link(opts) do
     Keyword.validate!(opts, [
@@ -114,7 +139,10 @@ defmodule FLAME.Pool do
       :single_use,
       :timeout,
       :boot_timeout,
-      :shutdown_timeout
+      :shutdown_timeout,
+      :on_grow_start,
+      :on_grow_end,
+      :on_shrink
     ])
 
     GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
@@ -225,6 +253,9 @@ defmodule FLAME.Pool do
       boot_timeout: boot_timeout,
       idle_shutdown_after: Keyword.get(opts, :idle_shutdown_after, @idle_shutdown_after),
       max_concurrency: Keyword.get(opts, :max_concurrency, @default_max_concurrency),
+      on_grow_start: opts[:on_grow_start],
+      on_grow_end: opts[:on_grow_end],
+      on_shrink: opts[:on_shrink],
       runner_opts: runner_opts
     }
 
@@ -269,6 +300,10 @@ defmodule FLAME.Pool do
 
   def handle_info({ref, {:ok, pid}}, %Pool{} = state) when is_reference(ref) do
     {:noreply, handle_runner_async_up(state, pid, ref)}
+  end
+
+  def handle_info(:async_boot_continue, %Pool{} = state) do
+    {:noreply, async_boot_runner(%Pool{state | async_boot_timer: nil})}
   end
 
   @impl true
@@ -324,7 +359,7 @@ defmodule FLAME.Pool do
 
     cond do
       runner_count == 0 || (min_runner.count == state.max_concurrency && runner_count < state.max) ->
-        if map_size(state.pending_runners) > 0 do
+        if map_size(state.pending_runners) > 0 || state.async_boot_timer do
           waiting_in(state, from)
         else
           state
@@ -343,6 +378,7 @@ defmodule FLAME.Pool do
   defp reply_runner_checkout(state, %RunnerState{} = runner, from, monitor_ref) do
     # we pass monitor_ref down from waiting so we don't need to remonitor if already monitoring
     {from_pid, _tag} = from
+
     ref =
       if monitor_ref do
         monitor_ref
@@ -351,7 +387,12 @@ defmodule FLAME.Pool do
       end
 
     GenServer.reply(from, {ref, runner.pid})
-    new_state = %Pool{state | callers: Map.put(state.callers, ref, {from_pid, runner.monitor_ref})}
+
+    new_state = %Pool{
+      state
+      | callers: Map.put(state.callers, ref, {from_pid, runner.monitor_ref})
+    }
+
     inc_runner_count(new_state, runner.monitor_ref)
   end
 
@@ -383,9 +424,26 @@ defmodule FLAME.Pool do
     end
   end
 
-  defp async_boot_runner(%Pool{} = state) do
-    task = Task.Supervisor.async_nolink(state.task_sup, fn -> start_child_runner(state) end)
-    new_pending = Map.put(state.pending_runners, task.ref, true)
+  defp schedule_async_boot_runner(%Pool{} = state) do
+    if state.async_boot_timer, do: Process.cancel_timer(state.async_boot_timer)
+
+    %Pool{
+      state
+      | async_boot_timer: Process.send_after(self(), :async_boot_continue, @async_boot_debounce)
+    }
+  end
+
+  defp async_boot_runner(%Pool{on_grow_start: on_grow_start, name: name} = state) do
+    new_count = runner_count(state) + 1
+
+    task =
+      Task.Supervisor.async_nolink(state.task_sup, fn ->
+        if on_grow_start, do: on_grow_start.(%{count: new_count, name: name, pid: self()})
+
+        start_child_runner(state)
+      end)
+
+    new_pending = Map.put(state.pending_runners, task.ref, task.pid)
     %Pool{state | pending_runners: new_pending}
   end
 
@@ -451,7 +509,7 @@ defmodule FLAME.Pool do
           acc
       end)
 
-    %Pool{new_state | runners: Map.delete(new_state.runners, runner_ref)}
+    maybe_on_shrink(%Pool{new_state | runners: Map.delete(new_state.runners, runner_ref)})
   end
 
   defp drop_caller(%Pool{} = state, caller_ref, runner_ref) do
@@ -483,7 +541,7 @@ defmodule FLAME.Pool do
     end
   end
 
-  defp handle_down(%Pool{} = state, {:DOWN, ref, :process, _pid, _reason}) do
+  defp handle_down(%Pool{} = state, {:DOWN, ref, :process, pid, reason}) do
     new_waiting =
       Enum.filter(state.waiting, fn %WaitingState{} = waiting ->
         waiting.monitor_ref != ref
@@ -509,15 +567,37 @@ defmodule FLAME.Pool do
     case state.pending_runners do
       %{^ref => _} ->
         state = %Pool{state | pending_runners: Map.delete(state.pending_runners, ref)}
-        # TODO: we may need to rate limit this to avoid many failed async boot attempts
+        # we rate limit this to avoid many failed async boot attempts
         if has_unmet_servicable_demand?(state) do
-          async_boot_runner(state)
-        else
           state
+          |> maybe_on_grow_end(pid, {:exit, reason})
+          |> schedule_async_boot_runner()
+        else
+          maybe_on_grow_end(state, pid, {:exit, reason})
         end
 
-      %{} -> state
+      %{} ->
+        state
     end
+  end
+
+  defp maybe_on_grow_end(%Pool{on_grow_end: on_grow_end} = state, pid, result) do
+    new_count = runner_count(state)
+    meta = %{count: new_count, name: state.name, pid: pid}
+
+    case result do
+      :ok -> if on_grow_end, do: on_grow_end.(:ok, meta)
+      {:exit, reason} -> if on_grow_end, do: on_grow_end.({:exit, reason}, meta)
+    end
+
+    state
+  end
+
+  defp maybe_on_shrink(%Pool{} = state) do
+    new_count = runner_count(state)
+    if state.on_shrink, do: state.on_shrink.(%{count: new_count, name: state.name})
+
+    state
   end
 
   defp has_unmet_servicable_demand?(%Pool{} = state) do
@@ -536,11 +616,12 @@ defmodule FLAME.Pool do
   end
 
   defp handle_runner_async_up(%Pool{} = state, pid, ref) when is_pid(pid) and is_reference(ref) do
-    %{^ref => _} = state.pending_runners
+    %{^ref => task_pid} = state.pending_runners
     Process.demonitor(ref, [:flush])
 
     new_state = %Pool{state | pending_runners: Map.delete(state.pending_runners, ref)}
     {runner, new_state} = put_runner(new_state, pid)
+    new_state = maybe_on_grow_end(new_state, task_pid, :ok)
 
     # pop waiting callers up to max_concurrency, but we must handle:
     # 1. the case where we have no waiting callers

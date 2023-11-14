@@ -58,6 +58,53 @@ defmodule FLAME.FLAMETest do
     assert new_pool == Supervisor.which_children(runner_sup)
   end
 
+  def on_grow_start(meta) do
+    send(:failure_test, {:grow_start, meta})
+
+    if Agent.get_and_update(:failure_test_counter, &{&1 + 1, &1 + 1}) <= 1 do
+      raise "boom"
+    end
+  end
+
+  def on_grow_end(result, meta) do
+    send(:failure_test, {:grow_start_end, result, meta})
+  end
+
+
+  @tag runner: [min: 1, max: 2, max_concurrency: 1, on_grow_start: &__MODULE__.on_grow_start/1, on_grow_end: &__MODULE__.on_grow_end/2]
+  test "failure of pending async runner bootup", %{runner_sup: runner_sup} = config do
+    parent = self()
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      start_supervised!(
+        {Agent,
+         fn ->
+           Process.register(self(), :failure_test_counter)
+           0
+         end}
+      )
+
+      Process.register(self(), :failure_test)
+      assert [{:undefined, _pid, :worker, [FLAME.Runner]}] = Supervisor.which_children(runner_sup)
+      # max concurrency above threshold tries to boot new runner
+      _task2 = sim_long_running(config.test, :infinity)
+      spawn_link(fn -> FLAME.cast(config.test, fn -> send(parent, :fullfilled) end) end)
+      # first attempt fails
+      refute_receive :fullfilled
+      assert_receive {:grow_start, %{count: 2, pid: pid}}
+      assert_receive {:grow_start_end, {:exit, _}, %{pid: ^pid, count: 1}}
+      assert length(Supervisor.which_children(runner_sup)) == 1
+
+      # retry attempt succeeds
+      assert_receive {:grow_start, %{count: 2, pid: pid}}, 1000
+      assert_receive {:grow_start_end, :ok, %{pid: ^pid, count: 2}}
+      # queued og caller is now fullfilled from retried runner boot
+      assert_receive :fullfilled
+      assert FLAME.call(config.test, fn -> :works end) == :works
+      assert length(Supervisor.which_children(runner_sup)) == 2
+    end)
+  end
+
   @tag runner: [min: 1, max: 2, max_concurrency: 2, idle_shutdown_after: 500]
   test "idle shutdown", %{runner_sup: runner_sup} = config do
     sim_long_running(config.test, 100)
