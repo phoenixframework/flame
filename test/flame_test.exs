@@ -70,8 +70,13 @@ defmodule FLAME.FLAMETest do
     send(:failure_test, {:grow_start_end, result, meta})
   end
 
-
-  @tag runner: [min: 1, max: 2, max_concurrency: 1, on_grow_start: &__MODULE__.on_grow_start/1, on_grow_end: &__MODULE__.on_grow_end/2]
+  @tag runner: [
+         min: 1,
+         max: 2,
+         max_concurrency: 1,
+         on_grow_start: &__MODULE__.on_grow_start/1,
+         on_grow_end: &__MODULE__.on_grow_end/2
+       ]
   test "failure of pending async runner bootup", %{runner_sup: runner_sup} = config do
     parent = self()
 
@@ -160,6 +165,23 @@ defmodule FLAME.FLAMETest do
       assert_receive {:ran, cast_pid}
       Process.monitor(cast_pid)
       assert_receive {:DOWN, _ref, :process, ^cast_pid, :boom}
+    end
+  end
+
+  @tag runner: [min: 0, max: 2, max_concurrency: 2, idle_shutdown_after: 100]
+  describe "process placement" do
+    test "place_child/2", %{runner_sup: runner_sup} = config do
+      assert [] = Supervisor.which_children(runner_sup)
+      assert {:ok, pid} = FLAME.place_child(config.test, {Agent, fn -> 1 end})
+      Process.monitor(pid)
+      assert [{:undefined, runner, :worker, [FLAME.Runner]}] = Supervisor.which_children(runner_sup)
+      Process.monitor(runner)
+      assert Agent.get(pid, & &1) == 1
+      # does not idle down runner or actively placed children
+      refute_receive {:DOWN, _ref, :process, _, _}
+      Agent.stop(pid)
+      assert_receive {:DOWN, _ref, :process, ^pid, _}, 100
+      assert_receive {:DOWN, _ref, :process, ^runner, _}, 1000
     end
   end
 end

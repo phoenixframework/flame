@@ -90,10 +90,17 @@ defmodule FLAME.Runner do
   end
 
   def place_child(runner_pid, child_spec, opts) when is_pid(runner_pid) and is_list(opts) do
+    # we must rewrite :temporary restart strategy for the spec to avoid restarting placed children
+    new_spec = Supervisor.child_spec(child_spec, restart: :temporary)
     caller = self()
-    call(runner_pid, fn terminator ->
-      Terminator.place_child(terminator, caller, child_spec)
-    end, opts[:timeout])
+
+    call(
+      runner_pid,
+      fn terminator ->
+        Terminator.place_child(terminator, caller, new_spec)
+      end,
+      opts[:timeout]
+    )
   end
 
   @doc """

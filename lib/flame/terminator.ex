@@ -1,5 +1,5 @@
 defmodule FLAME.Terminator.Caller do
-  defstruct from_pid: nil, timer: nil, placed_ref: nil
+  defstruct from_pid: nil, timer: nil, placed_child_ref: nil, placed_caller_ref: nil
 end
 
 defmodule FLAME.Terminator do
@@ -99,6 +99,7 @@ defmodule FLAME.Terminator do
 
         state = %Terminator{
           status: :connecting,
+          child_placement_sup: Keyword.fetch!(opts, :child_placement_sup),
           parent: parent,
           calls: %{},
           log: log,
@@ -180,7 +181,13 @@ defmodule FLAME.Terminator do
     case DynamicSupervisor.start_child(state.child_placement_sup, spec) do
       {:ok, child_pid} ->
         {child_ref, new_state} = deadline_caller(state, child_pid, :infinity)
-        {_caller_ref, new_state} = deadline_caller(new_state, caller, :infinity, child_ref)
+        {caller_ref, new_state} = deadline_caller(new_state, caller, :infinity)
+
+        new_state =
+          new_state
+          |> update_caller(child_ref, fn %Caller{} = child -> %Caller{child | placed_caller_ref: caller_ref} end)
+          |> update_caller(caller_ref, fn %Caller{} = caller -> %Caller{caller | placed_child_ref: child_ref} end)
+
         {:reply, {:ok, child_pid}, new_state}
 
       :ignore ->
@@ -218,7 +225,7 @@ defmodule FLAME.Terminator do
 
   @impl true
   def terminate(_reason, %Terminator{} = state) do
-    state = cancel_idle_shutdown(state)
+    state = cancel_idle_shutdown(state, :term)
 
     if map_size(state.calls) == 0 do
       :ok
@@ -232,7 +239,11 @@ defmodule FLAME.Terminator do
     end
   end
 
-  defp deadline_caller(%Terminator{} = state, from_pid, timeout, placed_ref \\ nil)
+  defp update_caller(%Terminator{} = state, ref, func) when is_reference(ref) and is_function(func, 1) do
+    %Terminator{state | calls: Map.update!(state.calls, ref, func)}
+  end
+
+  defp deadline_caller(%Terminator{} = state, from_pid, timeout)
        when is_pid(from_pid) and
               (is_integer(timeout) or timeout == :infinity) do
     ref = Process.monitor(from_pid)
@@ -243,9 +254,9 @@ defmodule FLAME.Terminator do
         ms when is_integer(ms) -> Process.send_after(self(), {:timeout, ref}, ms)
       end
 
-    caller = %Caller{from_pid: from_pid, timer: timer, placed_ref: placed_ref}
+    caller = %Caller{from_pid: from_pid, timer: timer}
     new_state = %Terminator{state | calls: Map.put(state.calls, ref, caller)}
-    {ref, cancel_idle_shutdown(new_state)}
+    {ref, cancel_idle_shutdown(new_state, {:new_deadline, from_pid})}
   end
 
   defp drop_caller(%Terminator{} = state, ref) when is_reference(ref) do
@@ -253,17 +264,30 @@ defmodule FLAME.Terminator do
     if caller.timer, do: Process.cancel_timer(caller.timer)
     state = %Terminator{state | calls: Map.delete(state.calls, ref)}
 
-    # if the caller going down was one that placed a child, terminate the child.
-    # there is no need to notify the original caller, as they linked themselves.
+    # if the caller going down was one that placed a child, and the child is still tracked,
+    # terminate the child. there is no need to notify the og caller, as they linked themselves.
     state =
-      if placed_ref = caller.placed_ref do
-        %{^placed_ref => %Caller{} = placed_caller} = state.calls
-        if placed_caller.timer, do: Process.cancel_timer(placed_caller.timer)
-        Process.demonitor(placed_ref, [:flush])
-        DynamicSupervisor.terminate_child(state.child_placement_sup, placed_caller.from_pid)
-        %Terminator{state | calls: Map.delete(state.calls, placed_ref)}
+      with placed_child_ref <- caller.placed_child_ref,
+           true <- is_reference(placed_child_ref),
+           %{^placed_child_ref => %Caller{} = placed_child} <- state.calls do
+        if placed_child.timer, do: Process.cancel_timer(placed_child.timer)
+        Process.demonitor(placed_child_ref, [:flush])
+        DynamicSupervisor.terminate_child(state.child_placement_sup, placed_child.from_pid)
+        %Terminator{state | calls: Map.delete(state.calls, placed_child_ref)}
       else
-        state
+        _ -> state
+      end
+
+    # if the caller going down was a placed child, clean up the placed caller ref
+    state =
+      with placed_caller_ref <- caller.placed_caller_ref,
+           true <- is_reference(placed_caller_ref),
+           %{^placed_caller_ref => %Caller{} = placed_caller} <- state.calls do
+        if placed_caller.timer, do: Process.cancel_timer(placed_caller.timer)
+        Process.demonitor(placed_caller_ref, [:flush])
+        %Terminator{state | calls: Map.delete(state.calls, placed_caller_ref)}
+      else
+        _ -> state
       end
 
     state =
@@ -281,7 +305,7 @@ defmodule FLAME.Terminator do
   end
 
   defp schedule_idle_shutdown(%Terminator{} = state) do
-    state = cancel_idle_shutdown(state)
+    state = cancel_idle_shutdown(state, :schedule)
 
     case state.idle_shutdown_after do
       time when time in [nil, :infinity] ->
@@ -293,7 +317,7 @@ defmodule FLAME.Terminator do
     end
   end
 
-  defp cancel_idle_shutdown(%Terminator{} = state) do
+  defp cancel_idle_shutdown(%Terminator{} = state, _reason) do
     if state.idle_shutdown_timer, do: Process.cancel_timer(state.idle_shutdown_timer)
     %Terminator{state | idle_shutdown_timer: nil}
   end
