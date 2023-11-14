@@ -59,6 +59,7 @@ defmodule FLAME.RunnerTest do
   end
 
   def wrap_exit(runner, func) do
+    prev_trap = Process.flag(:trap_exit, true)
     Process.unlink(runner)
     ref = make_ref()
 
@@ -74,7 +75,9 @@ defmodule FLAME.RunnerTest do
     end)
 
     receive do
-      {^ref, error} -> error
+      {^ref, error} ->
+        Process.flag(:trap_exit, prev_trap)
+        error
     end
   end
 

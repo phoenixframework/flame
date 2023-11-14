@@ -38,17 +38,14 @@ defmodule FLAME.LocalBackend do
   @impl true
   def remote_boot(state) do
     parent = FLAME.Parent.new(make_ref(), self(), __MODULE__)
-    opts = [parent: parent, log: state.log]
+    name = Module.concat(state.terminator_sup, to_string(System.unique_integer([:positive])))
+    opts = [name: name, parent: parent, log: state.log]
 
-    spec = %{
-      id: FLAME.Terminator,
-      start: {FLAME.Terminator, :start_link, [opts]},
-      restart: :temporary,
-      type: :worker
-    }
+    spec = Supervisor.child_spec({FLAME.Terminator, opts}, restart: :temporary)
+    {:ok, _sup_pid} = DynamicSupervisor.start_child(state.terminator_sup, spec)
 
-    {:ok, terminator_pid} = DynamicSupervisor.start_child(state.terminator_sup, spec)
-
-    {:ok, terminator_pid, state}
+    case Process.whereis(name) do
+      terminator_pid when is_pid(terminator_pid) -> {:ok, terminator_pid, state}
+    end
   end
 end

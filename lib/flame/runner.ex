@@ -103,10 +103,12 @@ defmodule FLAME.Runner do
     {ref, %Runner{} = runner, backend_state} = checkout(runner_pid)
     %Runner{terminator: terminator} = runner
     call_timeout = timeout || runner.timeout
+    caller_pid = self()
 
     result =
       remote_call(runner, backend_state, call_timeout, fn ->
         :ok = Terminator.deadline_me(terminator, call_timeout)
+        Process.link(caller_pid)
         if is_function(func, 1), do: func.(terminator), else: func.()
       end)
 
