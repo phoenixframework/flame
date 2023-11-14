@@ -22,15 +22,16 @@ defmodule FLAME.FLAMETest do
 
   setup config do
     runner_opts = Map.fetch!(config, :runner)
-    dyn_sup = Module.concat(config.test, "DynamicSup")
+    runner_sup = Module.concat(config.test, "RunnerSup")
     pool_pid = start_supervised!({Pool, Keyword.merge(runner_opts, name: config.test)})
 
-    {:ok, dyn_sup: dyn_sup, pool_pid: pool_pid}
+    {:ok, runner_sup: runner_sup, pool_pid: pool_pid}
   end
 
   @tag runner: [min: 1, max: 2, max_concurrency: 2]
-  test "init boots min runners synchronously", %{dyn_sup: dyn_sup} = config do
-    min_pool = Supervisor.which_children(dyn_sup)
+  test "init boots min runners synchronously and grows on demand",
+       %{runner_sup: runner_sup} = config do
+    min_pool = Supervisor.which_children(runner_sup)
     assert [{:undefined, _pid, :worker, [FLAME.Runner]}] = min_pool
     # execute against single runner
     assert FLAME.call(config.test, fn -> :works end) == :works
@@ -39,11 +40,11 @@ defmodule FLAME.FLAMETest do
     _task1 = sim_long_running(config.test)
     assert FLAME.call(config.test, fn -> :works end) == :works
     # max concurrency still below threshold
-    assert Supervisor.which_children(dyn_sup) == min_pool
+    assert Supervisor.which_children(runner_sup) == min_pool
     # max concurrency above threshold boots new runner
     _task2 = sim_long_running(config.test)
     assert FLAME.call(config.test, fn -> :works end) == :works
-    new_pool = Supervisor.which_children(dyn_sup)
+    new_pool = Supervisor.which_children(runner_sup)
     refute new_pool == min_pool
     assert length(new_pool) == 2
     # caller is now queued while waiting for available runner
@@ -54,11 +55,11 @@ defmodule FLAME.FLAMETest do
     ref = Process.monitor(queued)
     assert_receive {:DOWN, ^ref, :process, _, {:timeout, _}}, 1000
     assert FLAME.call(config.test, fn -> :queued end) == :queued
-    assert new_pool == Supervisor.which_children(dyn_sup)
+    assert new_pool == Supervisor.which_children(runner_sup)
   end
 
   @tag runner: [min: 1, max: 2, max_concurrency: 2, idle_shutdown_after: 500]
-  test "idle shutdown", %{dyn_sup: dyn_sup} = config do
+  test "idle shutdown", %{runner_sup: runner_sup} = config do
     sim_long_running(config.test, 100)
     sim_long_running(config.test, 100)
     sim_long_running(config.test, 100)
@@ -67,7 +68,7 @@ defmodule FLAME.FLAMETest do
     assert [
              {:undefined, runner1, :worker, [FLAME.Runner]},
              {:undefined, runner2, :worker, [FLAME.Runner]}
-           ] = Supervisor.which_children(dyn_sup)
+           ] = Supervisor.which_children(runner_sup)
 
     Process.monitor(runner1)
     Process.monitor(runner2)
@@ -75,15 +76,15 @@ defmodule FLAME.FLAMETest do
     refute_receive {:DOWN, _ref, :process, ^runner1, {:shutdown, :idle}}
 
     assert [{:undefined, ^runner1, :worker, [FLAME.Runner]}] =
-             Supervisor.which_children(dyn_sup)
+             Supervisor.which_children(runner_sup)
   end
 
   @tag runner: [min: 1, max: 1, max_concurrency: 2, idle_shutdown_after: 500]
-  test "pool runner DOWN exits any active checkouts", %{dyn_sup: dyn_sup} = config do
+  test "pool runner DOWN exits any active checkouts", %{runner_sup: runner_sup} = config do
     {:ok, active_checkout} = sim_long_running(config.test, 10_000)
     Process.unlink(active_checkout)
     Process.monitor(active_checkout)
-    assert [{:undefined, runner, :worker, [FLAME.Runner]}] = Supervisor.which_children(dyn_sup)
+    assert [{:undefined, runner, :worker, [FLAME.Runner]}] = Supervisor.which_children(runner_sup)
     Process.exit(runner, :brutal_kill)
     assert_receive {:DOWN, _ref, :process, ^active_checkout, :killed}
   end
@@ -103,10 +104,12 @@ defmodule FLAME.FLAMETest do
     test "with exit", %{} = config do
       sim_long_running(config.test, 100)
       parent = self()
+
       assert FLAME.cast(config.test, fn ->
-        send(parent, {:ran, self()})
-        exit(:boom)
-      end) == :ok
+               send(parent, {:ran, self()})
+               exit(:boom)
+             end) == :ok
+
       assert_receive {:ran, cast_pid}
       Process.monitor(cast_pid)
       assert_receive {:DOWN, _ref, :process, ^cast_pid, :boom}

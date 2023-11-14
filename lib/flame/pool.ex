@@ -37,7 +37,7 @@ defmodule FLAME.Pool do
   @idle_shutdown_after 30_000
 
   defstruct name: nil,
-            dynamic_sup: nil,
+            runner_sup: nil,
             task_sup: nil,
             terminator_sup: nil,
             child_placement_sup: nil,
@@ -101,7 +101,7 @@ defmodule FLAME.Pool do
   def start_link(opts) do
     Keyword.validate!(opts, [
       :name,
-      :dynamic_sup,
+      :runner_sup,
       :task_sup,
       :terminator_sup,
       :child_placement_sup,
@@ -215,7 +215,7 @@ defmodule FLAME.Pool do
       end
 
     state = %Pool{
-      dynamic_sup: Keyword.fetch!(opts, :dynamic_sup),
+      runner_sup: Keyword.fetch!(opts, :runner_sup),
       task_sup: Keyword.fetch!(opts, :task_sup),
       terminator_sup: terminator_sup,
       child_placement_sup: child_placement_sup,
@@ -399,7 +399,7 @@ defmodule FLAME.Pool do
       restart: :temporary
     }
 
-    {:ok, pid} = DynamicSupervisor.start_child(state.dynamic_sup, spec)
+    {:ok, pid} = DynamicSupervisor.start_child(state.runner_sup, spec)
 
     try do
       case Runner.remote_boot(pid) do
