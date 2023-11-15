@@ -10,8 +10,9 @@ defmodule FLAME.Application do
       |> Application.get_env(:terminator, [])
       |> Keyword.pop(:shutdown_timeout, 30_000)
 
+    opts = Keyword.put(opts, :name, FLAME.Terminator)
+
     children = [
-      {DynamicSupervisor, name: FLAME.ChildPlacementSup, strategy: :one_for_one},
       Supervisor.child_spec({FLAME.Terminator, opts}, shutdown: shutdown_timeout)
     ]
 

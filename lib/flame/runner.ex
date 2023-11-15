@@ -89,18 +89,34 @@ defmodule FLAME.Runner do
     GenServer.call(pid, {:remote_boot, timeout}, timeout || :infinity)
   end
 
+  def place_child(runner_pid, child_spec, opts) when is_pid(runner_pid) and is_list(opts) do
+    # we must rewrite :temporary restart strategy for the spec to avoid restarting placed children
+    new_spec = Supervisor.child_spec(child_spec, restart: :temporary)
+    caller = self()
+
+    call(
+      runner_pid,
+      fn terminator ->
+        Terminator.place_child(terminator, caller, new_spec)
+      end,
+      opts[:timeout]
+    )
+  end
+
   @doc """
   TODO
   """
-  def call(runner_pid, func, timeout \\ nil) when is_pid(runner_pid) and is_function(func, 0) do
+  def call(runner_pid, func, timeout \\ nil) when is_pid(runner_pid) and is_function(func) do
     {ref, %Runner{} = runner, backend_state} = checkout(runner_pid)
     %Runner{terminator: terminator} = runner
     call_timeout = timeout || runner.timeout
+    caller_pid = self()
 
     result =
       remote_call(runner, backend_state, call_timeout, fn ->
         :ok = Terminator.deadline_me(terminator, call_timeout)
-        func.()
+        Process.link(caller_pid)
+        if is_function(func, 1), do: func.(terminator), else: func.()
       end)
 
     case result do

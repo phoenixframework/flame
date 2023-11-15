@@ -24,17 +24,14 @@ defmodule FLAME.RunnerTest do
 
   defp remote_boot(state) do
     parent = FLAME.Parent.new(make_ref(), self(), MockBackend)
+    name = Module.concat(FLAME.TerminatorTest, to_string(System.unique_integer([:positive])))
+    opts = [name: name, parent: parent]
+    spec = Supervisor.child_spec({FLAME.Terminator, opts}, restart: :temporary)
+    {:ok, _sup_pid} = DynamicSupervisor.start_child(__MODULE__.TermSup, spec)
 
-    spec = %{
-      id: FLAME.Terminator,
-      start: {FLAME.Terminator, :start_link, [[parent: parent]]},
-      restart: :temporary,
-      type: :worker
-    }
-
-    {:ok, terminator_pid} = DynamicSupervisor.start_child(__MODULE__.TermSup, spec)
-
-    {:ok, terminator_pid, state}
+    case Process.whereis(name) do
+      terminator_pid when is_pid(terminator_pid) -> {:ok, terminator_pid, state}
+    end
   end
 
   def mock_successful_runner(executions, runner_opts \\ []) do
@@ -59,6 +56,7 @@ defmodule FLAME.RunnerTest do
   end
 
   def wrap_exit(runner, func) do
+    prev_trap = Process.flag(:trap_exit, true)
     Process.unlink(runner)
     ref = make_ref()
 
@@ -74,7 +72,9 @@ defmodule FLAME.RunnerTest do
     end)
 
     receive do
-      {^ref, error} -> error
+      {^ref, error} ->
+        Process.flag(:trap_exit, prev_trap)
+        error
     end
   end
 

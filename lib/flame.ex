@@ -202,9 +202,26 @@ defmodule FLAME do
   end
 
   @doc """
-  TODO
+  Places a child process on a remote runner for the given `FLAME.Pool`.
+
+  Any child process can be placed on the remote node and it will occupy a space
+  in the runner's `max_concurrency` allowance. This is useful for long running
+  workloads that you want to run asynchronously from the parent caller.
+
+  *Note*: The placed child process is linked to the parent and will only survice
+  as long as the parent does. This is to ensure that the child process is never
+  oprhaned permeantly on the remote node. If you require the the child process
+  to be a long-lived process that survives beyond some original parent lifetime,
+  you should wrap the parent caller in a `Task.Supervisor.start_child` who itself
+  calls `FLAME.place_child/3`.
+
+  Accepts any child spec.
+
+  ## Examples
+
+      {:ok, counter} = FLAME.place_child(MyRunner, {Agent, fn -> 0 end})
   """
-  def start_child(pool, child_spec, opts \\ []) when is_atom(pool) and is_list(opts) do
-    FLAME.Pool.start_child(pool, child_spec, opts)
+  def place_child(pool, child_spec, opts \\ []) when is_atom(pool) and is_list(opts) do
+    FLAME.Pool.place_child(pool, child_spec, opts)
   end
 end
