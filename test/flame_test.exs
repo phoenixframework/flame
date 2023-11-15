@@ -174,13 +174,26 @@ defmodule FLAME.FLAMETest do
       assert [] = Supervisor.which_children(runner_sup)
       assert {:ok, pid} = FLAME.place_child(config.test, {Agent, fn -> 1 end})
       Process.monitor(pid)
-      assert [{:undefined, runner, :worker, [FLAME.Runner]}] = Supervisor.which_children(runner_sup)
+
+      assert [{:undefined, runner, :worker, [FLAME.Runner]}] =
+               Supervisor.which_children(runner_sup)
+
       Process.monitor(runner)
       assert Agent.get(pid, & &1) == 1
       # does not idle down runner or actively placed children
-      refute_receive {:DOWN, _ref, :process, _, _}
+      refute_receive {:DOWN, _ref, :process, _, _}, 1000
+      # active caller to prevent idle down
+      assert FLAME.cast(config.test, fn ->
+               Process.sleep(1_000)
+             end) == :ok
+
       Agent.stop(pid)
       assert_receive {:DOWN, _ref, :process, ^pid, _}, 100
+
+      # runner does not idle down with active checkout from cast
+      refute_receive {:DOWN, _ref, :process, ^runner, _}, 1000
+
+      # runner idles down now that placed child and cast callers are gone
       assert_receive {:DOWN, _ref, :process, ^runner, _}, 1000
     end
   end

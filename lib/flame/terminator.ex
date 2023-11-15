@@ -266,6 +266,8 @@ defmodule FLAME.Terminator do
 
     # if the caller going down was one that placed a child, and the child is still tracked,
     # terminate the child. there is no need to notify the og caller, as they linked themselves.
+    # Note: there is also a race where we can't rely on the link to have happened to so we
+    # must monitor in the terminator even with the remote link
     state =
       with placed_child_ref <- caller.placed_child_ref,
            true <- is_reference(placed_child_ref),
