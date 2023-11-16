@@ -372,10 +372,7 @@ defmodule FLAME.Terminator do
       state.failsafe_timer && Process.cancel_timer(state.failsafe_timer)
       ref = Process.monitor(parent.pid)
 
-      send_parent(
-        parent,
-        {:remote_up, %{terminator: self(), child_placement_sup: state.child_placement_sup}}
-      )
+      send_parent(parent, {:remote_up, self()})
 
       %Terminator{
         state
