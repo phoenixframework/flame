@@ -40,7 +40,7 @@ defmodule FLAME.RunnerTest do
     MockBackend
     |> expect(:init, fn _opts -> {:ok, :state} end)
     |> expect(:remote_boot, fn :state -> remote_boot(@post_success) end)
-    |> expect(:handle_info, fn {_ref, :remote_up, _pid}, state -> {:noreply, state} end)
+    |> expect(:handle_info, fn {_ref, {:remote_up, _pid}}, state -> {:noreply, state} end)
     |> expect(:remote_spawn_monitor, executions, fn @post_success = _state, func ->
       {:ok, spawn_monitor(func)}
     end)
@@ -90,7 +90,7 @@ defmodule FLAME.RunnerTest do
     MockBackend
     |> expect(:init, fn _opts -> {:ok, :state} end)
     |> expect(:remote_boot, fn :state -> remote_boot(@post_success) end)
-    |> expect(:handle_info, fn {_ref, :remote_up, _pid}, state -> {:noreply, state} end)
+    |> expect(:handle_info, fn {_ref, {:remote_up, _pid}}, state -> {:noreply, state} end)
     |> expect(:remote_spawn_monitor, 2, fn @post_success = _state, func ->
       {:ok, spawn_monitor(func)}
     end)

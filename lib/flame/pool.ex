@@ -159,9 +159,11 @@ defmodule FLAME.Pool do
     {{ref, runner_pid}, opts} =
       with_elapsed_timeout(opts, fn -> GenServer.call(name, :checkout, opts[:timeout]) end)
 
-    result = Runner.call(runner_pid, func, opts[:timeout])
-    :ok = GenServer.call(name, {:checkin, ref})
-    result
+    try do
+      Runner.call(runner_pid, func, opts[:timeout])
+    after
+      :ok = GenServer.call(name, {:checkin, ref})
+    end
   end
 
   @doc """
@@ -173,8 +175,11 @@ defmodule FLAME.Pool do
     boot_timeout = lookup_boot_timeout(name)
     {ref, runner_pid} = GenServer.call(name, :checkout, boot_timeout)
 
-    :ok = Runner.cast(runner_pid, func)
-    :ok = GenServer.call(name, {:checkin, ref})
+    try do
+      :ok = Runner.cast(runner_pid, func)
+    after
+      :ok = GenServer.call(name, {:checkin, ref})
+    end
   end
 
   defp with_elapsed_timeout(opts, func) do
@@ -203,21 +208,30 @@ defmodule FLAME.Pool do
     {{ref, runner_pid}, opts} =
       with_elapsed_timeout(opts, fn -> GenServer.call(name, :checkout, opts[:timeout]) end)
 
-    case Runner.place_child(runner_pid, child_spec, opts) do
-      {:ok, child_pid} ->
-        Process.link(child_pid)
-        :ok = GenServer.call(name, {:replace_checkin, ref, child_pid})
-        {:ok, child_pid}
+    try do
+      case Runner.place_child(runner_pid, child_spec, opts) do
+        {:ok, child_pid} ->
+          Process.link(child_pid)
+          :ok = GenServer.call(name, {:replace_checkin, ref, child_pid})
+          {:ok, child_pid}
 
-      :ignore ->
-        :ok = GenServer.call(name, {:checkin, ref})
-        :ignore
+        :ignore ->
+          :ok = GenServer.call(name, {:checkin, ref})
+          :ignore
 
-      {:error, reason} ->
+        {:error, reason} ->
+          {:error, reason}
+      end
+    catch
+      kind, reason ->
         :ok = GenServer.call(name, {:checkin, ref})
-        {:error, reason}
+        uncatch(kind, reason, __STACKTRACE__)
     end
   end
+
+  defp uncatch(:exit, reason, _stack), do: exit(reason)
+  defp uncatch(:throw, val, _stack), do: throw(val)
+  defp uncatch(:error, err, stack), do: reraise(err, stack)
 
   defp lookup_boot_timeout(name) do
     :ets.lookup_element(name, :boot_timeout, 2)
@@ -522,6 +536,7 @@ defmodule FLAME.Pool do
 
   defp pop_next_waiting_caller(%Pool{} = state) do
     # we flush DOWN's so we don't send a lease to a waiting caller that is already down
+    # TODO do process alive instead of flush
     new_state = flush_downs(state)
 
     case new_state.waiting do

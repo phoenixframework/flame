@@ -207,7 +207,7 @@ defmodule FLAME.Runner do
     end
   end
 
-  def handle_info({_ref, :remote_shutdown, reason}, state) do
+  def handle_info({_ref, {:remote_shutdown, reason}}, state) do
     {:stop, {:shutdown, reason}, state}
   end
 

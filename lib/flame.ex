@@ -208,12 +208,9 @@ defmodule FLAME do
   in the runner's `max_concurrency` allowance. This is useful for long running
   workloads that you want to run asynchronously from the parent caller.
 
-  *Note*: The placed child process is linked to the parent and will only survice
-  as long as the parent does. This is to ensure that the child process is never
-  oprhaned permeantly on the remote node. If you require the the child process
-  to be a long-lived process that survives beyond some original parent lifetime,
-  you should wrap the parent caller in a `Task.Supervisor.start_child` who itself
-  calls `FLAME.place_child/3`.
+  *Note*: The placed child process is linked to the caller and will only survive
+  as long as the caller does. This is to ensure that the child process is never
+  oprhaned permanently on the remote node.
 
   Accepts any child spec.
 

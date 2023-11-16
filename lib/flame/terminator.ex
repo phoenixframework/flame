@@ -79,7 +79,39 @@ defmodule FLAME.Terminator do
   end
 
   def place_child(terminator, caller, child_spec) when is_pid(caller) do
-    GenServer.call(terminator, {:place_child, caller, child_spec})
+    dynamic_sup = FLAME.Terminator.Supervisor.child_placement_sup_name(terminator)
+    %{start: start} = child_spec = Supervisor.child_spec(child_spec, [])
+    gl = Process.group_leader()
+    rewritten_start = {__MODULE__, :start_child_inside_sup, [start, terminator, caller, gl]}
+    wrapped_child_spec = %{child_spec | start: rewritten_start}
+    DynamicSupervisor.start_child(dynamic_sup, wrapped_child_spec)
+  end
+
+  # This runs inside the supervisor
+  # We rewrite the child spec in place_child/3 to call this function which starts
+  # the DynamicSupervisor child inside the child placement supervisor, and notifies the
+  # terminator via the {:placed_child, caller, child_pid} message.
+  # This approach allows the caller to place the child outside of terminator, safely.
+  def start_child_inside_sup({mod, fun, args}, terminator, caller, gl) do
+    # We switch the group leader, so that the newly started
+    # process gets the same group leader as the caller
+    initial_gl = Process.group_leader()
+    Process.group_leader(self(), gl)
+
+    try do
+      {resp, pid} =
+        case apply(mod, fun, args) do
+          {:ok, pid} = resp -> {resp, pid}
+          {:ok, pid, _info} = resp -> {resp, pid}
+          resp -> {resp, nil}
+        end
+
+      if pid, do: GenServer.call(terminator, {:placed_child, caller, pid})
+
+      resp
+    after
+      Process.group_leader(self(), initial_gl)
+    end
   end
 
   @impl true
@@ -97,9 +129,15 @@ defmodule FLAME.Terminator do
         :global_group.monitor_nodes(true)
         failsafe_timer = Process.send_after(self(), :failsafe_shutdown, failsafe_timeout)
 
+        child_placement_sup =
+          case Keyword.fetch!(opts, :child_placement_sup) do
+            pid when is_pid(pid) -> pid
+            name when is_atom(name) -> Process.whereis(name)
+          end
+
         state = %Terminator{
           status: :connecting,
-          child_placement_sup: Keyword.fetch!(opts, :child_placement_sup),
+          child_placement_sup: child_placement_sup,
           parent: parent,
           calls: %{},
           log: log,
@@ -127,10 +165,16 @@ defmodule FLAME.Terminator do
   end
 
   def handle_info({:timeout, ref}, state) do
-    %{^ref => %Caller{} = caller} = state.calls
-    Process.demonitor(ref, [])
-    Process.exit(caller.from_pid, :kill)
-    {:noreply, drop_caller(state, ref)}
+    # we can't rely on the ref to be there as Process.cancel_timer may still have delivered
+    case state.calls do
+      %{^ref => %Caller{} = caller} ->
+        Process.demonitor(ref, [])
+        Process.exit(caller.from_pid, :kill)
+        {:noreply, drop_caller(state, ref)}
+
+      %{} ->
+        {:noreply, state}
+    end
   end
 
   def handle_info({:DOWN, ref, :process, pid, reason}, %Terminator{} = state) do
@@ -168,7 +212,7 @@ defmodule FLAME.Terminator do
 
   def handle_info(:idle_shutdown, %Terminator{parent: parent} = state) do
     if state.idle_shutdown_check.() do
-      send(parent.pid, {parent.ref, :remote_shutdown, :idle})
+      send_parent(parent, {:remote_shutdown, :idle})
       new_state = system_stop(state, "idle shutdown")
       {:noreply, new_state}
     else
@@ -177,25 +221,16 @@ defmodule FLAME.Terminator do
   end
 
   @impl true
-  def handle_call({:place_child, caller, spec}, _from, %Terminator{} = state) do
-    case DynamicSupervisor.start_child(state.child_placement_sup, spec) do
-      {:ok, child_pid} ->
-        {child_ref, new_state} = deadline_caller(state, child_pid, :infinity)
-        {caller_ref, new_state} = deadline_caller(new_state, caller, :infinity)
+  def handle_call({:placed_child, caller, child_pid}, _from, %Terminator{} = state) do
+    {child_ref, new_state} = deadline_caller(state, child_pid, :infinity)
+    {caller_ref, new_state} = deadline_caller(new_state, caller, :infinity)
 
-        new_state =
-          new_state
-          |> update_caller(child_ref, fn %Caller{} = child -> %Caller{child | placed_caller_ref: caller_ref} end)
-          |> update_caller(caller_ref, fn %Caller{} = caller -> %Caller{caller | placed_child_ref: child_ref} end)
+    new_state =
+      new_state
+      |> update_caller(child_ref, fn child -> %Caller{child | placed_caller_ref: caller_ref} end)
+      |> update_caller(caller_ref, fn caller -> %Caller{caller | placed_child_ref: child_ref} end)
 
-        {:reply, {:ok, child_pid}, new_state}
-
-      :ignore ->
-        {:reply, :ignore, state}
-
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
-    end
+    {:reply, {:ok, child_pid}, new_state}
   end
 
   def handle_call(:system_shutdown, _from, %Terminator{} = state) do
@@ -225,21 +260,23 @@ defmodule FLAME.Terminator do
 
   @impl true
   def terminate(_reason, %Terminator{} = state) do
-    state = cancel_idle_shutdown(state, :term)
+    state = cancel_idle_shutdown(state)
 
-    if map_size(state.calls) == 0 do
-      :ok
-    else
-      # supervisor will force kill us if we take longer than configured shutdown_timeout
-      Enum.each(state.calls, fn {ref, %Caller{}} ->
+    # supervisor will force kill us if we take longer than configured shutdown_timeout
+    Enum.each(state.calls, fn
+      # skip callers that placed a child since they are on the remote node
+      {_ref, %Caller{placed_child_ref: ref}} when not is_nil(ref) ->
+        :ok
+
+      {ref, %Caller{}} ->
         receive do
           {:DOWN, ^ref, :process, _pid, _reason} -> :ok
         end
-      end)
-    end
+    end)
   end
 
-  defp update_caller(%Terminator{} = state, ref, func) when is_reference(ref) and is_function(func, 1) do
+  defp update_caller(%Terminator{} = state, ref, func)
+       when is_reference(ref) and is_function(func, 1) do
     %Terminator{state | calls: Map.update!(state.calls, ref, func)}
   end
 
@@ -256,7 +293,7 @@ defmodule FLAME.Terminator do
 
     caller = %Caller{from_pid: from_pid, timer: timer}
     new_state = %Terminator{state | calls: Map.put(state.calls, ref, caller)}
-    {ref, cancel_idle_shutdown(new_state, {:new_deadline, from_pid})}
+    {ref, cancel_idle_shutdown(new_state)}
   end
 
   defp drop_caller(%Terminator{} = state, ref) when is_reference(ref) do
@@ -307,7 +344,7 @@ defmodule FLAME.Terminator do
   end
 
   defp schedule_idle_shutdown(%Terminator{} = state) do
-    state = cancel_idle_shutdown(state, :schedule)
+    state = cancel_idle_shutdown(state)
 
     case state.idle_shutdown_after do
       time when time in [nil, :infinity] ->
@@ -319,7 +356,7 @@ defmodule FLAME.Terminator do
     end
   end
 
-  defp cancel_idle_shutdown(%Terminator{} = state, _reason) do
+  defp cancel_idle_shutdown(%Terminator{} = state) do
     if state.idle_shutdown_timer, do: Process.cancel_timer(state.idle_shutdown_timer)
     %Terminator{state | idle_shutdown_timer: nil}
   end
@@ -334,7 +371,11 @@ defmodule FLAME.Terminator do
     if connected? do
       state.failsafe_timer && Process.cancel_timer(state.failsafe_timer)
       ref = Process.monitor(parent.pid)
-      send(parent.pid, {parent.ref, :remote_up, self()})
+
+      send_parent(
+        parent,
+        {:remote_up, %{terminator: self(), child_placement_sup: state.child_placement_sup}}
+      )
 
       %Terminator{
         state
@@ -366,5 +407,9 @@ defmodule FLAME.Terminator do
     if level do
       Logger.log(level, message)
     end
+  end
+
+  defp send_parent(%Parent{} = parent, msg) do
+    send(parent.pid, {parent.ref, msg})
   end
 end
