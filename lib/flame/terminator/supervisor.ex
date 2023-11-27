@@ -31,6 +31,6 @@ defmodule FLAME.Terminator.Supervisor do
         }
       ]
 
-    Supervisor.init(children, strategy: :one_for_all)
+    Supervisor.init(children, strategy: :one_for_all, max_restarts: 0)
   end
 end

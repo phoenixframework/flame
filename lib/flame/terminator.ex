@@ -260,7 +260,10 @@ defmodule FLAME.Terminator do
 
   @impl true
   def terminate(_reason, %Terminator{} = state) do
-    state = cancel_idle_shutdown(state)
+    state =
+      state
+      |> cancel_idle_shutdown()
+      |> system_stop("terminating")
 
     # supervisor will force kill us if we take longer than configured shutdown_timeout
     Enum.each(state.calls, fn
