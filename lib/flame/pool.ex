@@ -3,7 +3,7 @@ defmodule FLAME.Pool.RunnerState do
 end
 
 defmodule FLAME.Pool.WaitingState do
-  defstruct from: nil, monitor_ref: nil
+  defstruct from: nil, monitor_ref: nil, deadline: nil
 end
 
 defmodule FLAME.Pool do
@@ -154,16 +154,9 @@ defmodule FLAME.Pool do
   See `FLAME.call/3` for more information.
   """
   def call(name, func, opts \\ []) when is_function(func, 0) and is_list(opts) do
-    opts = Keyword.put_new_lazy(opts, :timeout, fn -> lookup_boot_timeout(name) end)
-
-    {{ref, runner_pid}, opts} =
-      with_elapsed_timeout(opts, fn -> GenServer.call(name, :checkout, opts[:timeout]) end)
-
-    try do
-      Runner.call(runner_pid, func, opts[:timeout])
-    after
-      :ok = GenServer.call(name, {:checkin, ref})
-    end
+    caller_checkout!(name, opts, :call, [name, func, opts], fn runner_pid, remaining_timeout ->
+      {:cancel, :ok, Runner.call(runner_pid, func, remaining_timeout)}
+    end)
   end
 
   @doc """
@@ -173,65 +166,90 @@ defmodule FLAME.Pool do
   """
   def cast(name, func) when is_function(func, 0) do
     boot_timeout = lookup_boot_timeout(name)
-    {ref, runner_pid} = GenServer.call(name, :checkout, boot_timeout)
 
-    try do
-      :ok = Runner.cast(runner_pid, func)
-    after
-      :ok = GenServer.call(name, {:checkin, ref})
-    end
-  end
-
-  defp with_elapsed_timeout(opts, func) do
-    {micro, result} = :timer.tc(func)
-    elapsed_ms = div(micro, 1000)
-
-    opts =
-      case Keyword.fetch(opts, :timeout) do
-        {:ok, :infinity} -> opts
-        {:ok, ms} when is_integer(ms) -> Keyword.put(opts, :timeout, ms - elapsed_ms)
-        {:ok, nil} -> opts
-        :error -> opts
-      end
-
-    {result, opts}
+    caller_checkout!(name, [timeout: boot_timeout], :cast, [name, func], fn runner_pid, _ ->
+      {:cancel, :ok, Runner.cast(runner_pid, func)}
+    end)
   end
 
   @doc """
-  TODO
-
   See `FLAME.place_child/3` for more information.
   """
   def place_child(name, child_spec, opts) do
-    opts = Keyword.put_new_lazy(opts, :timeout, fn -> lookup_boot_timeout(name) end)
-
-    {{ref, runner_pid}, opts} =
-      with_elapsed_timeout(opts, fn -> GenServer.call(name, :checkout, opts[:timeout]) end)
-
-    try do
-      case Runner.place_child(runner_pid, child_spec, opts) do
-        {:ok, child_pid} ->
+    caller_checkout!(name, opts, :place_child, [name, child_spec, opts], fn runner_pid,
+                                                                            remaining_timeout ->
+      case Runner.place_child(runner_pid, child_spec, opts[:timeout] || remaining_timeout) do
+        {:ok, child_pid} = result ->
           Process.link(child_pid)
-          :ok = GenServer.call(name, {:replace_checkin, ref, child_pid})
-          {:ok, child_pid}
+          {:cancel, {:replace, child_pid}, result}
 
         :ignore ->
-          :ok = GenServer.call(name, {:checkin, ref})
-          :ignore
+          {:cancel, :ok, :ignore}
 
-        {:error, reason} ->
-          {:error, reason}
+        {:error, _reason} = result ->
+          {:cancel, :ok, result}
       end
-    catch
-      kind, reason ->
-        :ok = GenServer.call(name, {:checkin, ref})
-        uncatch(kind, reason, __STACKTRACE__)
+    end)
+  end
+
+  defp caller_checkout!(name, opts, fun_name, args, func) do
+    timeout = opts[:timeout] || lookup_boot_timeout(name)
+    pid = Process.whereis(name) || exit!(:noproc, fun_name, args)
+    ref = Process.monitor(pid)
+    {start_time, deadline} = deadline(timeout)
+
+    # Manually implement call to avoid double monitor.
+    # Auto-connect is asynchronous. But we still use :noconnect to make sure
+    # we send on the monitored connection, and not trigger a new auto-connect.
+    Process.send(pid, {:"$gen_call", {self(), ref}, {:checkout, deadline}}, [:noconnect])
+
+    receive do
+      {^ref, runner_pid} ->
+        try do
+          Process.demonitor(ref, [:flush])
+          remaining_timeout = remaining_timeout(opts, start_time)
+          IO.inspect({:call, runner_pid})
+          func.(runner_pid, remaining_timeout)
+        catch
+          kind, reason ->
+            send(pid, {ref, :cancel, :catch})
+            :erlang.raise(kind, reason, __STACKTRACE__)
+        else
+          {:cancel, reason, result} ->
+            send(pid, {ref, :cancel, reason})
+            result
+        end
+
+      {:DOWN, ^ref, _, _, reason} ->
+        exit!(reason, fun_name, args)
+    after
+      timeout ->
+        send(pid, {ref, :cancel, :timeout})
+        Process.demonitor(ref, [:flush])
+        exit!(:timeout, fun_name, args)
     end
   end
 
-  defp uncatch(:exit, reason, _stack), do: exit(reason)
-  defp uncatch(:throw, val, _stack), do: throw(val)
-  defp uncatch(:error, err, stack), do: reraise(err, stack)
+  defp exit!(reason, fun, args), do: exit({reason, {__MODULE__, fun, args}})
+
+  defp remaining_timeout(opts, mono_start) do
+    case Keyword.fetch(opts, :timeout) do
+      {:ok, :infinity = inf} ->
+        inf
+
+      {:ok, nil} ->
+        nil
+
+      {:ok, ms} when is_integer(ms) ->
+        elapsed_ms =
+          System.convert_time_unit(System.monotonic_time() - mono_start, :native, :millisecond)
+
+        ms - elapsed_ms
+
+      :error ->
+        nil
+    end
+  end
 
   defp lookup_boot_timeout(name) do
     :ets.lookup_element(name, :boot_timeout, 2)
@@ -321,16 +339,18 @@ defmodule FLAME.Pool do
   end
 
   @impl true
-  def handle_call(:checkout, from, state) do
-    {:noreply, checkout_runner(state, from)}
+  def handle_call({:checkout, deadline}, from, state) do
+    {:noreply, checkout_runner(state, deadline, from)}
   end
 
-  def handle_call({:replace_checkin, ref, child_pid}, _from, state) do
-    {:reply, :ok, replace_caller(state, ref, child_pid)}
-  end
+  def handle_call({ref, :cancel, reason}, _from, state) do
+    case reason do
+      {:replace, child_pid} ->
+        {:reply, :ok, replace_caller(state, ref, child_pid)}
 
-  def handle_call({:checkin, ref}, _from, state) do
-    {:reply, :ok, checkin_runner(state, ref)}
+      reason when reason in [:ok, :timeout, :catch] ->
+        {:reply, :ok, checkin_runner(state, ref)}
+    end
   end
 
   defp runner_count(state) do
@@ -367,52 +387,52 @@ defmodule FLAME.Pool do
     drop_caller(state, ref, runner_ref)
   end
 
-  defp checkout_runner(%Pool{} = state, from, monitor_ref \\ nil) do
+  defp checkout_runner(%Pool{} = state, deadline, from, monitor_ref \\ nil) do
     min_runner = min_runner(state)
     runner_count = runner_count(state)
 
     cond do
       runner_count == 0 || (min_runner.count == state.max_concurrency && runner_count < state.max) ->
         if map_size(state.pending_runners) > 0 || state.async_boot_timer do
-          waiting_in(state, from)
+          waiting_in(state, deadline, from)
         else
           state
           |> async_boot_runner()
-          |> waiting_in(from)
+          |> waiting_in(deadline, from)
         end
 
       min_runner && min_runner.count < state.max_concurrency ->
         reply_runner_checkout(state, min_runner, from, monitor_ref)
 
       true ->
-        waiting_in(state, from)
+        waiting_in(state, deadline, from)
     end
   end
 
   defp reply_runner_checkout(state, %RunnerState{} = runner, from, monitor_ref) do
     # we pass monitor_ref down from waiting so we don't need to remonitor if already monitoring
-    {from_pid, _tag} = from
+    {from_pid, caller_ref} = from
 
-    ref =
+    caller_monitor_ref =
       if monitor_ref do
         monitor_ref
       else
         Process.monitor(from_pid)
       end
 
-    GenServer.reply(from, {ref, runner.pid})
+    GenServer.reply(from, runner.pid)
 
     new_state = %Pool{
       state
-      | callers: Map.put(state.callers, ref, {from_pid, runner.monitor_ref})
+      | callers: Map.put(state.callers, from_pid, {caller_monitor_ref, runner.monitor_ref})
     }
 
     inc_runner_count(new_state, runner.monitor_ref)
   end
 
-  defp waiting_in(%Pool{} = state, {pid, _tag} = from) do
+  defp waiting_in(%Pool{} = state, deadline, {pid, _tag} = from) do
     ref = Process.monitor(pid)
-    waiting = %WaitingState{from: from, monitor_ref: ref}
+    waiting = %WaitingState{from: from, monitor_ref: ref, deadline: deadline}
     %Pool{state | waiting: state.waiting ++ [waiting]}
   end
 
@@ -535,13 +555,19 @@ defmodule FLAME.Pool do
   end
 
   defp pop_next_waiting_caller(%Pool{} = state) do
-    # we flush DOWN's so we don't send a lease to a waiting caller that is already down
-    # TODO do process alive instead of flush
-    new_state = flush_downs(state)
+    new_waiting =
+      Enum.drop_while(state.waiting, fn %WaitingState{monitor_ref: ref, deadline: deadline} ->
+        if Process.alive?(ref) and not deadline_expired?(deadline) do
+          false
+        else
+          Process.demonitor(ref, [:flush])
+          true
+        end
+      end)
 
-    case new_state.waiting do
-      [] -> {nil, new_state}
-      [%WaitingState{} = first | rest] -> {first, %Pool{new_state | waiting: rest}}
+    case new_waiting do
+      [] -> {nil, %Pool{state | waiting: new_waiting}}
+      [%WaitingState{} = first | rest] -> {first, %Pool{state | waiting: rest}}
     end
   end
 
@@ -552,7 +578,7 @@ defmodule FLAME.Pool do
 
       {%WaitingState{} = first, new_state} ->
         # checkout_runner will borrow already running monitor
-        checkout_runner(new_state, first.from, first.monitor_ref)
+        checkout_runner(new_state, first.deadline, first.from, first.monitor_ref)
     end
   end
 
@@ -619,17 +645,6 @@ defmodule FLAME.Pool do
     Enum.count(state.waiting) > 0 and runner_count(state) < state.max
   end
 
-  defp flush_downs(%Pool{} = state) do
-    receive do
-      {:DOWN, _ref, :process, _pid, _reason} = msg ->
-        state
-        |> handle_down(msg)
-        |> flush_downs()
-    after
-      0 -> state
-    end
-  end
-
   defp handle_runner_async_up(%Pool{} = state, pid, ref) when is_pid(pid) and is_reference(ref) do
     %{^ref => task_pid} = state.pending_runners
     Process.demonitor(ref, [:flush])
@@ -665,4 +680,19 @@ defmodule FLAME.Pool do
       new_state
     end
   end
+
+  defp deadline(timeout) when is_integer(timeout) do
+    t1 = System.monotonic_time()
+    {t1, t1 + System.convert_time_unit(timeout, :millisecond, :native)}
+  end
+
+  defp deadline(:infinity) do
+    {System.monotonic_time(), :infinity}
+  end
+
+  defp deadline_expired?(deadline) when is_integer(deadline) do
+    System.monotonic_time() >= deadline
+  end
+
+  defp deadline_expired?(:infinity), do: false
 end

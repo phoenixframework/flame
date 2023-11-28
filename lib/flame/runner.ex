@@ -2,7 +2,7 @@ defmodule FLAME.Runner do
   @moduledoc false
   # ## Runners
 
-  # In practice, users will utilize the `FLAME.call/3` and `FLAME.cast/3` functions
+  # In practice, users utilize the `FLAME.call/3` and `FLAME.cast/3` functions
   # to accomplish their work. These functions are backed by a `FLAME.Pool` of
   # `FLAME.Runner`'s
   #
@@ -89,7 +89,8 @@ defmodule FLAME.Runner do
     GenServer.call(pid, {:remote_boot, timeout}, timeout || :infinity)
   end
 
-  def place_child(runner_pid, child_spec, opts) when is_pid(runner_pid) and is_list(opts) do
+  def place_child(runner_pid, child_spec, timeout)
+      when is_pid(runner_pid) and (is_integer(timeout) or timeout == :infinity) do
     # we must rewrite :temporary restart strategy for the spec to avoid restarting placed children
     new_spec = Supervisor.child_spec(child_spec, restart: :temporary)
     caller = self()
@@ -99,7 +100,7 @@ defmodule FLAME.Runner do
       fn terminator ->
         Terminator.place_child(terminator, caller, new_spec)
       end,
-      opts[:timeout]
+      timeout
     )
   end
 
