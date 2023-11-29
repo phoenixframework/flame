@@ -12,7 +12,7 @@ defmodule FLAME.QueueTest do
   describe "insert/3" do
     test "inserts a new item into the queue" do
       queue = Queue.insert(Queue.new(), "item1", :key1)
-      assert queue.size == 1
+      assert Queue.size(queue) == 1
       assert Queue.get_by_key(queue, :key1) == "item1"
     end
   end
@@ -24,13 +24,16 @@ defmodule FLAME.QueueTest do
         |> Queue.insert("item1", :key1)
         |> Queue.insert("item2", :key2)
 
+      assert queue.keys == %{key1: 0, key2: 1}
+
       {popped_item, %Queue{} = queue} = Queue.pop(queue)
 
-      assert popped_item == "item1"
-      assert queue.size == 1
+      assert popped_item == {:key1, "item1"}
+      assert Queue.size(queue) == 1
+      assert queue.keys == %{key2: 1}
 
-      assert {"item2", %Queue{} = queue} = Queue.pop(queue)
-      assert queue.size == 0
+      assert {{:key2, "item2"}, %Queue{} = queue} = Queue.pop(queue)
+      assert Queue.size(queue) == 0
       assert queue.idx == 0
     end
 
@@ -42,7 +45,8 @@ defmodule FLAME.QueueTest do
   describe "pop_until/2" do
     test "pops until function returns true" do
       queue = Queue.new()
-      assert Queue.pop_until(queue, fn _ -> true end) == {nil, queue}
+      assert Queue.pop_until(queue, fn _, _ -> true end) == {nil, queue}
+
       queue =
         Queue.new()
         |> Queue.insert(10, :key1)
@@ -50,8 +54,9 @@ defmodule FLAME.QueueTest do
         |> Queue.insert(20, :key3)
         |> Queue.insert(30, :key4)
 
-      assert {20, %Queue{} = queue} = Queue.pop_until(queue, fn i -> i >= 20 end)
-      assert queue.size == 1
+      assert {{:key3, 20}, %Queue{} = queue} = Queue.pop_until(queue, fn _key, i -> i >= 20 end)
+      assert Queue.size(queue) == 1
+      assert queue.keys == %{key4: 3}
     end
   end
 
@@ -82,15 +87,15 @@ defmodule FLAME.QueueTest do
       queue = Queue.delete_by_key(queue, :key1)
       assert Queue.get_by_key(queue, :key1) == nil
       assert Queue.get_by_key(queue, :key2) == "item2"
-      assert queue.size == 1
+      assert Queue.size(queue) == 1
       assert queue.idx == 2
       queue = Queue.delete_by_key(queue, :key2)
-      assert queue.size == 0
+      assert Queue.size(queue) == 0
       assert queue.idx == 0
 
       queue = Queue.insert(queue, "item3", :key3)
       assert Queue.get_by_key(queue, :key3) == "item3"
-      assert queue.size == 1
+      assert Queue.size(queue) == 1
       assert queue.idx == 1
     end
 

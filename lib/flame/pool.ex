@@ -365,7 +365,7 @@ defmodule FLAME.Pool do
   end
 
   defp waiting_count(%Pool{waiting: %Queue{} = waiting}) do
-    waiting.size
+    Queue.size(waiting)
   end
 
   defp min_runner(state) do
@@ -590,7 +590,7 @@ defmodule FLAME.Pool do
 
   defp pop_next_waiting_caller(%Pool{} = state) do
     result =
-      Queue.pop_until(state.waiting, fn %WaitingState{} = waiting ->
+      Queue.pop_until(state.waiting, fn _pid, %WaitingState{} = waiting ->
         %WaitingState{from: {pid, _}, monitor_ref: ref, deadline: deadline} = waiting
         # we don't need to reply to waiting callers because they will either have died
         # or execeeded their own deadline handled by receive + after
@@ -604,7 +604,7 @@ defmodule FLAME.Pool do
 
     case result do
       {nil, %Queue{} = new_waiting} -> {nil, %Pool{state | waiting: new_waiting}}
-      {%WaitingState{} = first, %Queue{} = rest} -> {first, %Pool{state | waiting: rest}}
+      {{_pid, %WaitingState{} = first}, %Queue{} = rest} -> {first, %Pool{state | waiting: rest}}
     end
   end
 
