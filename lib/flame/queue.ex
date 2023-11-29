@@ -7,10 +7,9 @@ defmodule FLAME.Queue do
     %FLAME.Queue{}
   end
 
-  def insert(%Queue{} = queue, value, key) do
-    %Queue{tree: tree, keys: keys, idx: idx, size: size} = queue
-    new_tree = :gb_trees.insert(idx, value, tree)
-    new_keys = Map.put(keys, key, idx)
+  def insert(%Queue{idx: idx, size: size} = queue, value, key) do
+    new_tree = :gb_trees.insert(idx, value, queue.tree)
+    new_keys = Map.put(queue.keys, key, idx)
     %Queue{queue | tree: new_tree, keys: new_keys, idx: idx + 1, size: size + 1}
   end
 
