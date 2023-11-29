@@ -6,6 +6,10 @@ defmodule FLAME.Pool.WaitingState do
   defstruct from: nil, monitor_ref: nil, deadline: nil
 end
 
+defmodule FLAME.Pool.Caller do
+  defstruct checkout_ref: nil, monitor_ref: nil, runner_ref: nil
+end
+
 defmodule FLAME.Pool do
   @moduledoc """
   Manages a pool of `FLAME.Runner`'s.
@@ -30,7 +34,7 @@ defmodule FLAME.Pool do
   use GenServer
 
   alias FLAME.{Pool, Runner}
-  alias FLAME.Pool.{RunnerState, WaitingState}
+  alias FLAME.Pool.{RunnerState, WaitingState, Caller}
 
   @default_max_concurrency 100
   @boot_timeout 30_000
@@ -208,15 +212,14 @@ defmodule FLAME.Pool do
         try do
           Process.demonitor(ref, [:flush])
           remaining_timeout = remaining_timeout(opts, start_time)
-          IO.inspect({:call, runner_pid})
           func.(runner_pid, remaining_timeout)
         catch
           kind, reason ->
-            send(pid, {ref, :cancel, :catch})
+            send_cancel(pid, ref, :catch)
             :erlang.raise(kind, reason, __STACKTRACE__)
         else
           {:cancel, reason, result} ->
-            send(pid, {ref, :cancel, reason})
+            send_cancel(pid, ref, reason)
             result
         end
 
@@ -224,10 +227,14 @@ defmodule FLAME.Pool do
         exit!(reason, fun_name, args)
     after
       timeout ->
-        send(pid, {ref, :cancel, :timeout})
+        send_cancel(pid, ref, :timeout)
         Process.demonitor(ref, [:flush])
         exit!(:timeout, fun_name, args)
     end
+  end
+
+  defp send_cancel(pid, ref, reason) when is_pid(pid) and is_reference(ref) do
+    send(pid, {:cancel, ref, self(), reason})
   end
 
   defp exit!(reason, fun, args), do: exit({reason, {__MODULE__, fun, args}})
@@ -338,19 +345,19 @@ defmodule FLAME.Pool do
     {:noreply, async_boot_runner(%Pool{state | async_boot_timer: nil})}
   end
 
+  def handle_info({:cancel, ref, caller_pid, reason}, state) do
+    case reason do
+      {:replace, child_pid} ->
+        {:noreply, replace_caller(state, ref, caller_pid, child_pid)}
+
+      reason when reason in [:ok, :timeout, :catch] ->
+        {:noreply, checkin_runner(state, ref, caller_pid, reason)}
+    end
+  end
+
   @impl true
   def handle_call({:checkout, deadline}, from, state) do
     {:noreply, checkout_runner(state, deadline, from)}
-  end
-
-  def handle_call({ref, :cancel, reason}, _from, state) do
-    case reason do
-      {:replace, child_pid} ->
-        {:reply, :ok, replace_caller(state, ref, child_pid)}
-
-      reason when reason in [:ok, :timeout, :catch] ->
-        {:reply, :ok, checkin_runner(state, ref)}
-    end
   end
 
   defp runner_count(state) do
@@ -366,25 +373,42 @@ defmodule FLAME.Pool do
     end
   end
 
-  defp replace_caller(state, ref, child_pid) do
+  defp replace_caller(state, checkout_ref, caller_pid, child_pid) do
     # replace caller with child pid and do not inc concurrency counts since we are replacing
-    %{^ref => {_caller_pid, runner_ref}} = state.callers
-    Process.demonitor(ref, [:flush])
-    new_ref = Process.monitor(child_pid)
+    %{^caller_pid => %Caller{checkout_ref: ^checkout_ref} = caller} = state.callers
+    Process.demonitor(caller.monitor_ref, [:flush])
+
+    new_caller = %Caller{
+      checkout_ref: checkout_ref,
+      monitor_ref: Process.monitor(child_pid),
+      runner_ref: caller.runner_ref
+    }
 
     new_callers =
       state.callers
-      |> Map.delete(ref)
-      |> Map.put(new_ref, {child_pid, runner_ref})
+      |> Map.delete(caller_pid)
+      |> Map.put(child_pid, new_caller)
 
     %Pool{state | callers: new_callers}
   end
 
-  defp checkin_runner(state, ref) do
-    %{^ref => {_caller_pid, runner_ref}} = state.callers
-    Process.demonitor(ref, [:flush])
+  defp checkin_runner(state, ref, caller_pid, reason)
+       when is_reference(ref) and is_pid(caller_pid) do
+    case state.callers do
+      %{^caller_pid => %Caller{checkout_ref: ^ref} = caller} ->
+        Process.demonitor(caller.monitor_ref, [:flush])
+        drop_caller(state, caller_pid, caller)
 
-    drop_caller(state, ref, runner_ref)
+      # the only way to race a checkin is if the caller has expired while still in the
+      # waiting state and checks in on the timeout before we lease it a runner.
+      # We leave it in waiting to be cleaned up later by another caller
+      %{} when reason == :timeout ->
+        state
+
+      %{} ->
+        raise ArgumentError,
+              "expected to checkin runner for #{inspect(caller_pid)} that does not exist"
+    end
   end
 
   defp checkout_runner(%Pool{} = state, deadline, from, monitor_ref \\ nil) do
@@ -411,7 +435,7 @@ defmodule FLAME.Pool do
 
   defp reply_runner_checkout(state, %RunnerState{} = runner, from, monitor_ref) do
     # we pass monitor_ref down from waiting so we don't need to remonitor if already monitoring
-    {from_pid, caller_ref} = from
+    {from_pid, checkout_ref} = from
 
     caller_monitor_ref =
       if monitor_ref do
@@ -422,10 +446,13 @@ defmodule FLAME.Pool do
 
     GenServer.reply(from, runner.pid)
 
-    new_state = %Pool{
-      state
-      | callers: Map.put(state.callers, from_pid, {caller_monitor_ref, runner.monitor_ref})
+    new_caller = %Caller{
+      checkout_ref: checkout_ref,
+      monitor_ref: caller_monitor_ref,
+      runner_ref: runner.monitor_ref
     }
+
+    new_state = %Pool{state | callers: Map.put(state.callers, from_pid, new_caller)}
 
     inc_runner_count(new_state, runner.monitor_ref)
   end
@@ -534,30 +561,33 @@ defmodule FLAME.Pool do
     # kill all callers that still had a checkout for this runner
     new_state =
       Enum.reduce(state.callers, state, fn
-        {caller_ref, {caller_pid, ^runner_ref}}, acc ->
-          Process.demonitor(caller_ref, [:flush])
+        {caller_pid, %Caller{monitor_ref: ref, runner_ref: ^runner_ref}}, acc ->
+          Process.demonitor(ref, [:flush])
           Process.exit(caller_pid, :kill)
-          %Pool{acc | callers: Map.delete(acc.callers, caller_ref)}
+          %Pool{acc | callers: Map.delete(acc.callers, caller_pid)}
 
-        {_caller_ref, {_caller_pid, _runner_ref}}, acc ->
+        {_caller_pid, %Caller{}}, acc ->
           acc
       end)
 
     maybe_on_shrink(%Pool{new_state | runners: Map.delete(new_state.runners, runner_ref)})
   end
 
-  defp drop_caller(%Pool{} = state, caller_ref, runner_ref) do
-    new_state = %Pool{state | callers: Map.delete(state.callers, caller_ref)}
+  defp drop_caller(%Pool{} = state, caller_pid, %Caller{} = caller) when is_pid(caller_pid) do
+    new_state = %Pool{state | callers: Map.delete(state.callers, caller_pid)}
 
     new_state
-    |> dec_runner_count(runner_ref)
+    |> dec_runner_count(caller.runner_ref)
     |> call_next_waiting_caller()
   end
 
   defp pop_next_waiting_caller(%Pool{} = state) do
     new_waiting =
-      Enum.drop_while(state.waiting, fn %WaitingState{monitor_ref: ref, deadline: deadline} ->
-        if Process.alive?(ref) and not deadline_expired?(deadline) do
+      Enum.drop_while(state.waiting, fn %WaitingState{} = waiting ->
+        %WaitingState{from: {pid, _}, monitor_ref: ref, deadline: deadline} = waiting
+        # we don't need to reply to waiting callers because they will either have died
+        # or execeeded their own deadline handled by receive + after
+        if Process.alive?(pid) and not deadline_expired?(deadline) do
           false
         else
           Process.demonitor(ref, [:flush])
@@ -592,8 +622,8 @@ defmodule FLAME.Pool do
 
     state =
       case state.callers do
-        %{^ref => {_caller_pid, runner_ref}} ->
-          drop_caller(state, ref, runner_ref)
+        %{^pid => %Caller{monitor_ref: ^ref} = caller} ->
+          drop_caller(state, pid, caller)
 
         %{} ->
           state

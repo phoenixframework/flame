@@ -90,7 +90,7 @@ defmodule FLAME.Runner do
   end
 
   def place_child(runner_pid, child_spec, timeout)
-      when is_pid(runner_pid) and (is_integer(timeout) or timeout == :infinity) do
+      when is_pid(runner_pid) and (is_integer(timeout) or timeout in [:infinity, nil]) do
     # we must rewrite :temporary restart strategy for the spec to avoid restarting placed children
     new_spec = Supervisor.child_spec(child_spec, restart: :temporary)
     caller = self()
