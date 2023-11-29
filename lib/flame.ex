@@ -212,11 +212,16 @@ defmodule FLAME do
   as long as the caller does. This is to ensure that the child process is never
   oprhaned permanently on the remote node.
 
+  *Note*: The child spec will be rewritten to use a temporary restart strategy
+  to ensure that the child process is never restarted on the remote node when it
+  exits. If you want restart behavior, you need to monitor on the parent node and
+  replace the child yourself.
+
   Accepts any child spec.
 
   ## Examples
 
-      {:ok, counter} = FLAME.place_child(MyRunner, {Agent, fn -> 0 end})
+      {:ok, pid} = FLAME.place_child(MyRunner, {MyWorker, []})
   """
   def place_child(pool, child_spec, opts \\ []) when is_atom(pool) and is_list(opts) do
     FLAME.Pool.place_child(pool, child_spec, opts)

@@ -26,9 +26,7 @@ defmodule FLAME.Pool do
   See `start_link/1` for supported options.
 
   ## TODO
-
-  - interface to configure min/max at runtime
-  - callbacks for pool events so folks can hook into pool growth/shrinkage
+  [ ] interface to configure min/max at runtime
 
   """
   use GenServer

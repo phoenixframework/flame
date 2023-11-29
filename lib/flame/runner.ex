@@ -59,12 +59,17 @@ defmodule FLAME.Runner do
             idle_shutdown_check: nil
 
   @doc """
-  TODO
+  Starts a runner.
 
-  ## Examples
+  ## Options
 
-      iex> FLAME.Runner.start_link()
-      {:ok, pid}
+    `:backend` - The `Flame.Backend` implementation to use
+    `:log` - The log level, or `false
+    `:single_use` - The boolean on whether to terminate the runner after it's first call
+    `:timeout` - The execution timeout of calls
+    `:boot_timeout` - The boot timeout of the runner
+    `:shutdown_timeout` - The shutdown timeout
+    `:idle_shutdown_after` - The idle shutdown time
   """
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts)
@@ -75,20 +80,19 @@ defmodule FLAME.Runner do
   end
 
   @doc """
-  TODO
-
-  ## Examples
-
-      iex> {:ok, pid} = FLAME.Runner.start_link(...)
-      {:ok, pid}
-
-      iex> FLAME.Runner.remote_boot(pid)
-      :ok
+  Boots the remote runner using the `FLAME.Backend`.
   """
   def remote_boot(pid, timeout \\ nil) when is_pid(pid) do
     GenServer.call(pid, {:remote_boot, timeout}, timeout || :infinity)
   end
 
+  @doc """
+  Places a child process on the remote node.
+
+  The started child spec will be rewritten to use the `:temporary` restart strategy
+  to ensure that the child is not restarted if it exits. If you want restart
+  behavior, you must monitor the process yourself on the parent node and replace it.
+  """
   def place_child(runner_pid, child_spec, timeout)
       when is_pid(runner_pid) and (is_integer(timeout) or timeout in [:infinity, nil]) do
     # we must rewrite :temporary restart strategy for the spec to avoid restarting placed children
@@ -105,7 +109,7 @@ defmodule FLAME.Runner do
   end
 
   @doc """
-  TODO
+  Calls a function on the remote node.
   """
   def call(runner_pid, func, timeout \\ nil) when is_pid(runner_pid) and is_function(func) do
     {ref, %Runner{} = runner, backend_state} = checkout(runner_pid)
@@ -137,7 +141,7 @@ defmodule FLAME.Runner do
   end
 
   @doc """
-  TODO
+  Casts a function to the remote node.
   """
   def cast(runner_pid, func) when is_pid(runner_pid) and is_function(func, 0) do
     {ref, runner, backend_state} = checkout(runner_pid)
