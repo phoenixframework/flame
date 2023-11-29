@@ -33,7 +33,7 @@ defmodule FLAME.Pool do
   """
   use GenServer
 
-  alias FLAME.{Pool, Runner}
+  alias FLAME.{Pool, Runner, Queue}
   alias FLAME.Pool.{RunnerState, WaitingState, Caller}
 
   @default_max_concurrency 100
@@ -52,7 +52,7 @@ defmodule FLAME.Pool do
             max: nil,
             max_concurrency: nil,
             callers: %{},
-            waiting: [],
+            waiting: Queue.new(),
             runners: %{},
             pending_runners: %{},
             runner_opts: [],
@@ -364,6 +364,10 @@ defmodule FLAME.Pool do
     map_size(state.runners) + map_size(state.pending_runners)
   end
 
+  defp waiting_count(%Pool{waiting: %Queue{} = waiting}) do
+    waiting.size
+  end
+
   defp min_runner(state) do
     if map_size(state.runners) == 0 do
       nil
@@ -401,9 +405,8 @@ defmodule FLAME.Pool do
 
       # the only way to race a checkin is if the caller has expired while still in the
       # waiting state and checks in on the timeout before we lease it a runner.
-      # We leave it in waiting to be cleaned up later by another caller
       %{} when reason == :timeout ->
-        state
+        maybe_drop_waiting(state, caller_pid)
 
       %{} ->
         raise ArgumentError,
@@ -460,7 +463,7 @@ defmodule FLAME.Pool do
   defp waiting_in(%Pool{} = state, deadline, {pid, _tag} = from) do
     ref = Process.monitor(pid)
     waiting = %WaitingState{from: from, monitor_ref: ref, deadline: deadline}
-    %Pool{state | waiting: state.waiting ++ [waiting]}
+    %Pool{state | waiting: Queue.insert(state.waiting, waiting, pid)}
   end
 
   defp boot_runners(%Pool{} = state) do
@@ -581,23 +584,27 @@ defmodule FLAME.Pool do
     |> call_next_waiting_caller()
   end
 
+  defp maybe_drop_waiting(%Pool{} = state, caller_pid) when is_pid(caller_pid) do
+    %Pool{state | waiting: Queue.delete_by_key(state.waiting, caller_pid)}
+  end
+
   defp pop_next_waiting_caller(%Pool{} = state) do
-    new_waiting =
-      Enum.drop_while(state.waiting, fn %WaitingState{} = waiting ->
+    result =
+      Queue.pop_until(state.waiting, fn %WaitingState{} = waiting ->
         %WaitingState{from: {pid, _}, monitor_ref: ref, deadline: deadline} = waiting
         # we don't need to reply to waiting callers because they will either have died
         # or execeeded their own deadline handled by receive + after
         if Process.alive?(pid) and not deadline_expired?(deadline) do
-          false
+          true
         else
           Process.demonitor(ref, [:flush])
-          true
+          false
         end
       end)
 
-    case new_waiting do
-      [] -> {nil, %Pool{state | waiting: new_waiting}}
-      [%WaitingState{} = first | rest] -> {first, %Pool{state | waiting: rest}}
+    case result do
+      {nil, %Queue{} = new_waiting} -> {nil, %Pool{state | waiting: new_waiting}}
+      {%WaitingState{} = first, %Queue{} = rest} -> {first, %Pool{state | waiting: rest}}
     end
   end
 
@@ -613,12 +620,7 @@ defmodule FLAME.Pool do
   end
 
   defp handle_down(%Pool{} = state, {:DOWN, ref, :process, pid, reason}) do
-    new_waiting =
-      Enum.filter(state.waiting, fn %WaitingState{} = waiting ->
-        waiting.monitor_ref != ref
-      end)
-
-    state = %Pool{state | waiting: new_waiting}
+    state = maybe_drop_waiting(state, pid)
 
     state =
       case state.callers do
@@ -672,7 +674,7 @@ defmodule FLAME.Pool do
   end
 
   defp has_unmet_servicable_demand?(%Pool{} = state) do
-    Enum.count(state.waiting) > 0 and runner_count(state) < state.max
+    waiting_count(state) > 0 and runner_count(state) < state.max
   end
 
   defp handle_runner_async_up(%Pool{} = state, pid, ref) when is_pid(pid) and is_reference(ref) do
