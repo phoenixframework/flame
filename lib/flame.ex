@@ -64,14 +64,14 @@ defmodule FLAME do
          min: 0,
          max: 10,
          max_concurrency: 5,
-         idle_shutdown_after: :timer.minutes(5)},
+         idle_shutdown_after: 30_000},
       ]
 
   Here we add a `FLAME.Pool` to our application supervision tree, configuring
   a minimum of 0 and maximum of 10 runners. This acheives "scale to zero" behavior
   while also allowing the pool to scale up to 10 runners when load increases.
   Each runner in the case will be able to execute up to 5 concurrent functions.
-  The runners will shutdown atter 5 minutes of inactivity.
+  The runners will shutdown atter 30 seconds of inactivity.
 
   Calling a pool is as simple as passing its name to the FLAME functions:
 
@@ -104,7 +104,7 @@ defmodule FLAME do
            min: 0,
            max: 10,
            max_concurrency: 5,
-           idle_shutdown_after: :timer.minutes(5)},
+           idle_shutdown_after: 30_000},
         !flame_parent && ThumbsWeb.Endpoint
         ]
         |> Enum.filter(& &1)

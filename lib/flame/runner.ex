@@ -64,7 +64,7 @@ defmodule FLAME.Runner do
   ## Options
 
     `:backend` - The `Flame.Backend` implementation to use
-    `:log` - The log level, or `false
+    `:log` - The log level, or `false`
     `:single_use` - The boolean on whether to terminate the runner after it's first call
     `:timeout` - The execution timeout of calls
     `:boot_timeout` - The boot timeout of the runner
@@ -344,7 +344,7 @@ defmodule FLAME.Runner do
         status: :awaiting_boot,
         backend: :pending,
         backend_init: :pending,
-        log: Keyword.get(opts, :log, :info),
+        log: Keyword.get(opts, :log, false),
         single_use: Keyword.get(opts, :single_use, false),
         timeout: opts[:timeout] || 30_000,
         boot_timeout: opts[:boot_timeout] || 30_000,
@@ -367,15 +367,17 @@ defmodule FLAME.Runner do
     %Runner{runner | backend: backend, backend_init: backend_init}
   end
 
-  defp time(%Runner{log: :debug}, label, func) do
-    {elapsed_micro, result} = :timer.tc(func)
-    millisec = System.convert_time_unit(elapsed_micro, :microsecond, :millisecond)
-    Logger.info("#{label}: completed in #{millisec}ms")
-    result
+  defp time(%Runner{log: false} = _runner, _label, func) do
+    func.()
   end
 
-  defp time(%Runner{log: _} = _runner, _label, func) do
-    func.()
+  # TODO move this to telemetry
+  defp time(%Runner{log: level}, label, func) do
+    Logger.log(level, "#{label}: start")
+    {elapsed_micro, result} = :timer.tc(func)
+    millisec = System.convert_time_unit(elapsed_micro, :microsecond, :millisecond)
+    Logger.log(level, "#{label}: completed in #{millisec}ms")
+    result
   end
 
   defp put_checkout(state, from_pid, ref) when is_pid(from_pid) do
