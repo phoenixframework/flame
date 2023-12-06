@@ -6,7 +6,7 @@ defmodule FLAME.Backend do
   connecting them back to the parent node, and executing functions on them.
 
   The default `FLAME.LocalBackend` simply runs your code locally, allowing
-  you to development and test your application using `FLAME.call/3` without
+  you to develop and test your application using `FLAME.call/3` without
   running an external backend.
 
   ## Messaging
@@ -15,7 +15,7 @@ defmodule FLAME.Backend do
   responsible for connecting back to the parent node, notifying the parent, and
   handling termination of remote processes started via `FLAME.call/3`, `FLAME.cast/3`,
   and `FLAME.place_child/3`. When the terminator starts on a newly booted remote
-  node, it seends the following message to the parent runner process:
+  node, it sends the following message to the parent runner process:
 
       {ref, {:remote_up, remote_terminator_pid}}
 
@@ -26,7 +26,7 @@ defmodule FLAME.Backend do
 
       {ref, {:remote_shutdown, :idle}}
 
-  Backend impelementations can react to these messages to handle the remotely
+  Backend implementations can react to these messages to handle the remotely
   provisioned instance booting up or shutting down.
 
   See `FLAME.FlyBackend` for an example implementation of this behavior.
