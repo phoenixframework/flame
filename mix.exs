@@ -4,7 +4,7 @@ defmodule FLAME.Runner.MixProject do
   def project do
     [
       app: :flame,
-      version: "0.1.3",
+      version: "0.1.4",
       elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -13,7 +13,7 @@ defmodule FLAME.Runner.MixProject do
       source_url: "https://github.com/phoenixframework/flame",
       homepage_url: "http://www.phoenixframework.org",
       description: """
-      TODO
+      Treat your entire application as a lambda, where modular parts can be executed on short-lived infrastructure.
       """
     ]
   end
