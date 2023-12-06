@@ -20,7 +20,7 @@ def generate_thumbnails(%Video{} = vid, interval) do
     File.mkdir!(tmp_dir)
     System.cmd("ffmpeg", ~w(-i #{vid.url} -vf fps=1/#{interval} #{tmp_dir}/%02d.png))
     urls = VideoStore.put_thumbnails(vid, Path.wildcard(tmp_dir <> "/*.png"))
-    Repo.insert_all(Thumbnail, Enum.map(urls, &%{video_id: vid.id, url: url}))
+    Repo.insert_all(Thumbnail, Enum.map(urls, &%{video_id: vid.id, url: &1}))
   end)
 end
 ```
