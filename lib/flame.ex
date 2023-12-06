@@ -54,7 +54,7 @@ defmodule FLAME do
   Pools give you elastic scale that maximizes the newly spawned hardware.
   At the same time, you also want to avoid spawning unbound resources. You also
   want to keep spawned nodes alive for a period of time to avoid the overhead
-  of booting new ones before idleing them down. The following pool configuration
+  of booting new ones before idling them down. The following pool configuration
   takes care of all of this for you:
 
       children = [
@@ -71,7 +71,7 @@ defmodule FLAME do
   a minimum of 0 and maximum of 10 runners. This acheives "scale to zero" behavior
   while also allowing the pool to scale up to 10 runners when load increases.
   Each runner in the case will be able to execute up to 5 concurrent functions.
-  The runners will shutdown atter 30 seconds of inactivity.
+  The runners will shutdown after 30 seconds of inactivity.
 
   Calling a pool is as simple as passing its name to the FLAME functions:
 
@@ -92,7 +92,7 @@ defmodule FLAME do
   your existing pool size.
 
   To accomplish these you can use `FLAME.Parent.get/0` to conditionally enable or
-  disable processes in you `applicaiton.ex` file:
+  disable processes in you `application.ex` file:
 
       def start(_type, _args) do
         flame_parent = FLAME.Parent.get()
@@ -113,7 +113,7 @@ defmodule FLAME do
         Supervisor.start_link(children, opts)
       end
 
-  Here we filter the phoenix endpoint from being started when running as a FLAME
+  Here we filter the Phoenix endpoint from being started when running as a FLAME
   child because we have no need to handle web requests in this case.
 
   Or you can use `FLAME.Parent.get/0` to configure your database pool size:
@@ -176,7 +176,7 @@ defmodule FLAME do
 
     def my_expensive_thing(arg) do
       FLAME.call(MyApp.Runner, fn ->
-        # i'm now doing expensive work inside a new node
+        # I'm now doing expensive work inside a new node
         # pubsub and repo access all just work
         Phoenix.PubSub.broadcast(MyApp.PubSub, "topic", result)
 
