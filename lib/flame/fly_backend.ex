@@ -2,7 +2,7 @@ defmodule FLAME.FlyBackend do
   @moduledoc """
   The `FLAME.Backend` using [Fly.io](https://fly.io) machines.
 
-  The only required configuration is telling Dragonly to use the
+  The only required configuration is telling Dragonfly to use the
   `FLAME.FlyBackend` by default and the `:token` which is your Fly.io API
   token. These can be set via application configuration in your `config/runtime.exs`
   withing a `:prod` block:
