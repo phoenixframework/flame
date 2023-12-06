@@ -57,22 +57,22 @@ defmodule FLAME.FlyBackendTest do
   test "global configured backend" do
     assert_raise ArgumentError, ~r/missing :token/, fn ->
       Application.put_env(:flame, FLAME.FlyBackend, [])
-      Runner.new([backend: FLAME.FlyBackend])
+      Runner.new(backend: FLAME.FlyBackend)
     end
 
     assert_raise ArgumentError, ~r/missing :image/, fn ->
       Application.put_env(:flame, FLAME.FlyBackend, token: "123")
-      Runner.new([backend: FLAME.FlyBackend])
+      Runner.new(backend: FLAME.FlyBackend)
     end
 
     assert_raise ArgumentError, ~r/missing :app/, fn ->
       Application.put_env(:flame, FLAME.FlyBackend, token: "123", image: "img")
-      Runner.new([backend: FLAME.FlyBackend])
+      Runner.new(backend: FLAME.FlyBackend)
     end
 
     Application.put_env(:flame, :backend, FLAME.FlyBackend)
     Application.put_env(:flame, FLAME.FlyBackend, token: "123", image: "img", app: "app")
 
-    assert Runner.new([backend: FLAME.FlyBackend])
+    assert Runner.new(backend: FLAME.FlyBackend)
   end
 end
