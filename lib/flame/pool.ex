@@ -101,7 +101,7 @@ defmodule FLAME.Pool do
 
     * `:idle_shutdown_after` - The amount of time and function check to idle a remote node
       down after a period of inactivity. Defaults to 30 seconds. A tuple may also be passed
-      to check a spefici condition, for example:
+      to check a specific condition, for example:
 
           {10_000, fn -> Supervisor.which_children(MySup) == []}
 
