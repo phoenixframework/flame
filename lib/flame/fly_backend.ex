@@ -18,6 +18,27 @@ defmodule FLAME.FlyBackend do
   ```bash
   $ fly secrets set FLY_API_TOKEN="$(fly auth token)"
   ```
+
+  The following backend options are supported, and mirror the
+  (Fly.io machines create API)[https://fly.io/docs/machines/working-with-machines/]:
+
+    * `:cpu_kind` - The size of the runner CPU. Defaults to `"performance"`.
+
+    * `:cpus` - The number of runner CPUs. Defaults to  `System.schedulers_online()`
+      for the number of cores of the running parent app.
+
+    * `:memory_mb` - The memory of the runner. Defaults to `System.get_env("FLY_VM_MEMORY_MB") || 4096`.
+
+    * `:boot_timeout` - The boot timeout. Defaults to `30_000`.
+
+    * `:app` – The name of the otp app. Defaults to `System.get_env("FLY_APP_NAME")`,
+
+    * `:image` – The URL of the docker image to pass to the machines create endpoint.
+      Defaults to `System.get_env("FLY_IMAGE_REF")` which is the image of your running app.
+
+    * `:token` – The Fly API token. Defaults to `System.get_env("FLY_API_TOKEN")`.
+
+    * `:host` – The host of the Fly API. Defaults to `"https://api.machines.dev"`.
   """
   @behaviour FLAME.Backend
 
@@ -28,7 +49,10 @@ defmodule FLAME.FlyBackend do
   @derive {Inspect,
            only: [
              :host,
-             :size,
+             :cpu_kind,
+             :cpus,
+             :gpu_kind,
+             :memory_mb,
              :image,
              :app,
              :runner_id,
@@ -43,7 +67,10 @@ defmodule FLAME.FlyBackend do
   defstruct host: nil,
             local_ip: nil,
             env: %{},
-            size: nil,
+            cpu_kind: nil,
+            cpus: nil,
+            memory_mb: nil,
+            gpu_kind: nil,
             image: nil,
             app: nil,
             token: nil,
@@ -56,10 +83,12 @@ defmodule FLAME.FlyBackend do
             runner_private_ip: nil,
             runner_node_name: nil
 
+  @valid_opts ~w(app image token host cpu_kind cpus memory_mb gpu_kind boot_timeout env terminator_sup)a
+
   @impl true
   def init(opts) do
     :global_group.monitor_nodes(true)
-    conf = Enum.into(Application.get_env(:flame, __MODULE__) || [], %{})
+    conf = Application.get_env(:flame, __MODULE__) || []
     [node_base | ip] = node() |> to_string() |> String.split("@")
 
     default = %FlyBackend{
@@ -67,15 +96,19 @@ defmodule FLAME.FlyBackend do
       image: System.get_env("FLY_IMAGE_REF"),
       token: System.get_env("FLY_API_TOKEN"),
       host: "https://api.machines.dev",
-      size: "performance-2x",
+      cpu_kind: "performance",
+      cpus: System.schedulers_online(),
+      memory_mb: System.get_env("FLY_VM_MEMORY_MB") || 4096,
       boot_timeout: 30_000,
       runner_node_basename: node_base
     }
 
-    state =
-      default
-      |> Map.merge(conf)
-      |> Map.merge(Map.new(opts))
+    provided_opts =
+      conf
+      |> Keyword.merge(opts)
+      |> Keyword.validate!(@valid_opts)
+
+    state = Map.merge(default, Map.new(provided_opts))
 
     for key <- [:token, :image, :host, :app] do
       unless Map.get(state, key) do
@@ -143,7 +176,12 @@ defmodule FLAME.FlyBackend do
             name: "#{state.app}-flame-#{rand_id(20)}",
             config: %{
               image: state.image,
-              size: state.size,
+              guest: %{
+                cpu_kind: state.cpu_kind,
+                cpus: state.cpus,
+                memory_mb: state.memory_mb,
+                gpu_kind: state.gpu_kind
+              },
               auto_destroy: true,
               restart: %{policy: "no"},
               env: state.env

@@ -39,13 +39,19 @@ defmodule FLAME.FlyBackendTest do
       app: "app",
       host: "foo.local",
       env: %{one: 1},
-      size: "performance-1x"
+      cpu_kind: "performance",
+      cpus: 1,
+      memory_mb: 256,
+      gpu_kind: "a100-pcie-40gb",
     ]
 
     runner = new({FlyBackend, opts})
     assert {:ok, init} = runner.backend_init
     assert init.host == "foo.local"
-    assert init.size == "performance-1x"
+    assert init.cpu_kind == "performance"
+    assert init.cpus == 1
+    assert init.memory_mb == 256
+    assert init.gpu_kind == "a100-pcie-40gb"
 
     assert %{
              one: 1,
