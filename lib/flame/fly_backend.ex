@@ -27,7 +27,7 @@ defmodule FLAME.FlyBackend do
     * `:cpus` - The number of runner CPUs. Defaults to  `System.schedulers_online()`
       for the number of cores of the running parent app.
 
-    * `:memory_mb` - The memory of the runner. Defaults to `System.get_env("FLY_VM_MEMORY_MB") || 4096`.
+    * `:memory_mb` - The memory of the runner. Must be a 1024 multiple. Defaults to `4096`.
 
     * `:boot_timeout` - The boot timeout. Defaults to `30_000`.
 
@@ -98,7 +98,7 @@ defmodule FLAME.FlyBackend do
       host: "https://api.machines.dev",
       cpu_kind: "performance",
       cpus: System.schedulers_online(),
-      memory_mb: String.to_integer(System.get_env("FLY_VM_MEMORY_MB") || "4096"),
+      memory_mb: 4096,
       boot_timeout: 30_000,
       runner_node_basename: node_base
     }
