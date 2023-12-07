@@ -98,7 +98,7 @@ defmodule FLAME.FlyBackend do
       host: "https://api.machines.dev",
       cpu_kind: "performance",
       cpus: System.schedulers_online(),
-      memory_mb: System.get_env("FLY_VM_MEMORY_MB") || 4096,
+      memory_mb: String.to_integer(System.get_env("FLY_VM_MEMORY_MB") || "4096"),
       boot_timeout: 30_000,
       runner_node_basename: node_base
     }
