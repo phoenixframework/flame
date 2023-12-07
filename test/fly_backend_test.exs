@@ -42,7 +42,7 @@ defmodule FLAME.FlyBackendTest do
       cpu_kind: "performance",
       cpus: 1,
       memory_mb: 256,
-      gpu_kind: "a100-pcie-40gb",
+      gpu_kind: "a100-pcie-40gb"
     ]
 
     runner = new({FlyBackend, opts})
