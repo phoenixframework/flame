@@ -212,7 +212,8 @@ defmodule FLAME.Runner do
     end
   end
 
-  def handle_info({_ref, {:remote_shutdown, reason}}, state) do
+  def handle_info({_ref, {:remote_shutdown, reason}} = msg, state) do
+    maybe_backend_handle_info(state, msg)
     {:stop, {:shutdown, reason}, state}
   end
 
