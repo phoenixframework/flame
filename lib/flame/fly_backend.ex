@@ -39,6 +39,8 @@ defmodule FLAME.FlyBackend do
     * `:token` – The Fly API token. Defaults to `System.get_env("FLY_API_TOKEN")`.
 
     * `:host` – The host of the Fly API. Defaults to `"https://api.machines.dev"`.
+
+    * `:services` - The optional services to run on the machine. Defaults to `[]`.
   """
   @behaviour FLAME.Backend
 
@@ -72,6 +74,7 @@ defmodule FLAME.FlyBackend do
             memory_mb: nil,
             gpu_kind: nil,
             image: nil,
+            services: [],
             app: nil,
             token: nil,
             boot_timeout: nil,
@@ -100,7 +103,8 @@ defmodule FLAME.FlyBackend do
       cpus: System.schedulers_online(),
       memory_mb: 4096,
       boot_timeout: 30_000,
-      runner_node_basename: node_base
+      runner_node_basename: node_base,
+      services: []
     }
 
     provided_opts =
@@ -184,7 +188,8 @@ defmodule FLAME.FlyBackend do
               },
               auto_destroy: true,
               restart: %{policy: "no"},
-              env: state.env
+              env: state.env,
+              services: state.services
             }
           }
         )
