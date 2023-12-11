@@ -11,12 +11,12 @@ defmodule FLAME.Parent do
   Returns `nil` if no parent is set.
 
   When booting a FLAME node, the `FLAME.Backend` is required to
-  export the `DRAGONFLY_PARENT` environment variable for the provisioned
+  export the `FLAME_PARENT` environment variable for the provisioned
   instance. This value holds required information about the parent node
   and can be set using the `FLAME.Parent.encode/3` function.
   """
   def get do
-    with {:ok, encoded} <- System.fetch_env("DRAGONFLY_PARENT"),
+    with {:ok, encoded} <- System.fetch_env("FLAME_PARENT"),
          {ref, pid, backend} <- encoded |> Base.decode64!() |> :erlang.binary_to_term() do
       new(ref, pid, backend)
     else

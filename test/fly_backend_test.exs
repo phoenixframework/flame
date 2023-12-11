@@ -55,7 +55,7 @@ defmodule FLAME.FlyBackendTest do
 
     assert %{
              one: 1,
-             DRAGONFLY_PARENT: _,
+             FLAME_PARENT: _,
              PHX_SERVER: "false"
            } = init.env
   end

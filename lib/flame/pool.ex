@@ -75,7 +75,7 @@ defmodule FLAME.Pool do
     * `:name` - The name of the pool, for example: `MyApp.FFMPegRunner`
 
     * `:min` - The minimum number of runners to keep in the pool at all times.
-      For "scale to zero" behavior you may pass `0`. When starting as a dragonfly child,
+      For "scale to zero" behavior you may pass `0`. When starting as a flame child,
       the `:min` will be forced to zero to avoid recursively starting backend resources.
 
     * `:max` - The maximum number of runners to elastically grow to in the pool.
@@ -86,7 +86,7 @@ defmodule FLAME.Pool do
     * `:single_use` - if `true`, runners will be terminated after each call completes.
       Defaults `false`.
 
-    * `:backend` - The backend to use. Defaults to the configured `:dragonfly, :backend` or
+    * `:backend` - The backend to use. Defaults to the configured `:flame, :backend` or
       `FLAME.LocalBackend` if not configured.
 
     * `:log` - The log level to use for verbose logging. Defaults to `false`.
@@ -325,7 +325,7 @@ defmodule FLAME.Pool do
 
       :error ->
         backend = FLAME.Backend.impl()
-        backend_opts = Application.get_env(:dragonfly, backend) || []
+        backend_opts = Application.get_env(:flame, backend) || []
         Keyword.put(runner_opts, :backend, {backend, Keyword.merge(backend_opts, defaults)})
     end
   end
