@@ -324,10 +324,10 @@ defmodule FLAME.Pool do
 
     case Keyword.fetch(opts, :backend) do
       {:ok, {backend, opts}} ->
-        Keyword.update!(runner_opts, :backend, {backend, Keyword.merge(opts, defaults)})
+        Keyword.put(runner_opts, :backend, {backend, Keyword.merge(opts, defaults)})
 
       {:ok, backend} ->
-        Keyword.update!(runner_opts, :backend, {backend, defaults})
+        Keyword.put(runner_opts, :backend, {backend, defaults})
 
       :error ->
         backend = FLAME.Backend.impl()
