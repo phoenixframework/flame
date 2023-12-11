@@ -86,7 +86,7 @@ defmodule FLAME.FlyBackend do
             runner_private_ip: nil,
             runner_node_name: nil
 
-  @valid_opts ~w(app image token host cpu_kind cpus memory_mb gpu_kind boot_timeout env terminator_sup log)a
+  @valid_opts ~w(app image token host cpu_kind cpus memory_mb gpu_kind boot_timeout env terminator_sup log services)a
 
   @impl true
   def init(opts) do
