@@ -46,6 +46,7 @@ defmodule FLAME.Pool do
             child_placement_sup: nil,
             boot_timeout: nil,
             idle_shutdown_after: nil,
+            min_idle_shutdown_after: nil,
             min: nil,
             max: nil,
             max_concurrency: nil,
@@ -105,6 +106,9 @@ defmodule FLAME.Pool do
 
           {10_000, fn -> Supervisor.which_children(MySup) == []}
 
+    * `:min_idle_shutdown_after` - The same behavior of `:idle_shutdown_after`, but applied
+      to the the `:min` pool runners. Defaults to `:infinity`.
+
     * `:on_grow_start` - The optional function to be called when the pool starts booting a new
       runner beyond the configured `:min`. The function receives a map with the following metadata:
 
@@ -133,6 +137,7 @@ defmodule FLAME.Pool do
       :terminator_sup,
       :child_placement_sup,
       :idle_shutdown_after,
+      :min_idle_shutdown_after,
       :min,
       :max,
       :max_concurrency,
@@ -289,6 +294,7 @@ defmodule FLAME.Pool do
       max: Keyword.fetch!(opts, :max),
       boot_timeout: boot_timeout,
       idle_shutdown_after: Keyword.get(opts, :idle_shutdown_after, @idle_shutdown_after),
+      min_idle_shutdown_after: Keyword.get(opts, :min_idle_shutdown_after, :infinity),
       max_concurrency: Keyword.get(opts, :max_concurrency, @default_max_concurrency),
       on_grow_start: opts[:on_grow_start],
       on_grow_end: opts[:on_grow_end],
@@ -467,9 +473,11 @@ defmodule FLAME.Pool do
   defp boot_runners(%Pool{} = state) do
     if state.min > 0 do
       # start min runners, and do not idle them down regardless of idle configuration
+      # unless `:min_idle_shutdown_after` not infinity
       # TODO: allow % threshold of failed min's to continue startup?
       0..(state.min - 1)
-      |> Task.async_stream(fn _ -> start_child_runner(state, idle_shutdown_after: :infinity) end,
+      |> Task.async_stream(
+        fn _ -> start_child_runner(state, idle_shutdown_after: state.min_idle_shutdown_after) end,
         max_concurrency: 10,
         timeout: state.boot_timeout
       )
