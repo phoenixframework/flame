@@ -90,7 +90,6 @@ defmodule FLAME.FlyBackend do
 
   @impl true
   def init(opts) do
-    :global_group.monitor_nodes(true)
     conf = Application.get_env(:flame, __MODULE__) || []
     [node_base | ip] = node() |> to_string() |> String.split("@")
 
@@ -224,21 +223,6 @@ defmodule FLAME.FlyBackend do
       other ->
         {:error, other}
     end
-  end
-
-  @impl true
-  def handle_info({:nodedown, down_node}, state) do
-    if down_node == state.runner_node_name do
-      {:stop, {:shutdown, :noconnection}, state}
-    else
-      {:noreply, state}
-    end
-  end
-
-  def handle_info({:nodeup, _}, state), do: {:noreply, state}
-
-  def handle_info(_msg, state) do
-    {:noreply, state}
   end
 
   defp rand_id(len) do

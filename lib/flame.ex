@@ -210,7 +210,7 @@ defmodule FLAME do
 
   *Note*: The placed child process is linked to the caller and will only survive
   as long as the caller does. This is to ensure that the child process is never
-  oprhaned permanently on the remote node.
+  orphaned permanently on the remote node.
 
   *Note*: The child spec will be rewritten to use a temporary restart strategy
   to ensure that the child process is never restarted on the remote node when it
