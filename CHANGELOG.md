@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.7 (2023-12-15)
+- Fix error on concurrent calls when runners are pending
+
 ## 0.1.6 (2023-12-11)
 - Fix references to incorrectly named FLAME_PARENT export
 
