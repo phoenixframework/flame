@@ -58,6 +58,30 @@ defmodule FLAME.FLAMETest do
     assert new_pool == Supervisor.which_children(runner_sup)
   end
 
+  @tag runner: [min: 0, max: 1, max_concurrency: 2]
+  test "concurrent calls on fully pending runners",
+       %{runner_sup: runner_sup} = config do
+    assert Supervisor.which_children(runner_sup) == []
+    parent = self()
+
+    Task.start_link(fn ->
+      FLAME.call(config.test, fn ->
+        send(parent, :called)
+        Process.sleep(:infinity)
+      end)
+    end)
+
+    Task.start_link(fn ->
+      FLAME.call(config.test, fn ->
+        send(parent, :called)
+        Process.sleep(:infinity)
+      end)
+    end)
+
+    assert_receive :called
+    assert_receive :called
+  end
+
   def on_grow_start(meta) do
     send(:failure_test, {:grow_start, meta})
 
