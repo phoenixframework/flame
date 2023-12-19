@@ -54,6 +54,7 @@ defmodule FLAME.FlyBackend do
              :cpu_kind,
              :cpus,
              :gpu_kind,
+             :mounts,
              :memory_mb,
              :image,
              :app,
@@ -73,6 +74,7 @@ defmodule FLAME.FlyBackend do
             cpus: nil,
             memory_mb: nil,
             gpu_kind: nil,
+            mounts: [],
             image: nil,
             services: [],
             app: nil,
@@ -86,7 +88,7 @@ defmodule FLAME.FlyBackend do
             runner_private_ip: nil,
             runner_node_name: nil
 
-  @valid_opts ~w(app image token host cpu_kind cpus memory_mb gpu_kind boot_timeout env terminator_sup log services)a
+  @valid_opts ~w(app image token host cpu_kind cpus mounts memory_mb gpu_kind boot_timeout env terminator_sup log services)a
 
   @impl true
   def init(opts) do
@@ -179,11 +181,12 @@ defmodule FLAME.FlyBackend do
             name: "#{state.app}-flame-#{rand_id(20)}",
             config: %{
               image: state.image,
+              mounts: state.mounts,
               guest: %{
                 cpu_kind: state.cpu_kind,
                 cpus: state.cpus,
                 memory_mb: state.memory_mb,
-                gpu_kind: state.gpu_kind
+                gpu_kind: state.gpu_kind,
               },
               auto_destroy: true,
               restart: %{policy: "no"},
