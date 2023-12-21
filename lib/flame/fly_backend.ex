@@ -105,7 +105,8 @@ defmodule FLAME.FlyBackend do
       memory_mb: 4096,
       boot_timeout: 30_000,
       runner_node_basename: node_base,
-      services: []
+      services: [],
+      mounts: []
     }
 
     provided_opts =
@@ -168,8 +169,65 @@ defmodule FLAME.FlyBackend do
     {result, div(micro, 1000)}
   end
 
+  defp get_volume_id(%FlyBackend{ mounts: mounts } = state) when is_list(mounts) do
+    case mounts do
+      [] ->
+        {nil, 0}
+      mounts ->
+        {vols, time} = get_volumes(state)
+
+        case vols do
+          [] ->
+            {:error, "no volumes to mount"}
+          all_vols ->
+            vols = 
+              all_vols
+              |> Enum.filter(fn vol ->
+                vol["attached_machine_id"] == nil
+              end)
+
+            volume_ids_by_name =
+              vols
+              |> Enum.group_by(fn vol ->
+                vol["name"]
+              end)
+              |> Enum.map(fn {name, vols} ->
+                {name, Enum.map(vols, fn vol -> vol["id"] end)}
+              end)
+
+              {new_mounts, leftover_vols} = Enum.reduce(mounts, {[], volume_ids_by_name}, fn mount, {new_mounts, leftover_vols} ->
+                case Enum.find(leftover_vols, fn {name, ids} -> name == mount.name end) do
+                  nil ->
+                    raise ArgumentError, "not enough fly volumes with the name \"#{mount.name}\" to a FLAME child"
+                  {_, [id | rest]} ->
+                    {new_mount, leftover_vols} = Enum.split(rest, 1)
+                    {new_mounts ++ [%{mount | volume: id}], leftover_vols}
+                end
+              end)
+
+            {new_mounts, time}
+        end
+    end
+  end
+  defp get_volume_id(_) do
+    raise ArgumentError, "expected a list of mounts"
+  end
+
+  defp get_volumes(%FlyBackend{} = state) do
+      {vols, get_vols_time} = with_elapsed_ms(fn ->
+        Req.get!("#{state.host}/v1/apps/#{state.app}/volumes",
+          connect_options: [timeout: state.boot_timeout],
+          retry: false,
+          auth: {:bearer, state.token},
+        )
+      end)
+
+      {vols.body, get_vols_time}
+  end
+
   @impl true
   def remote_boot(%FlyBackend{parent_ref: parent_ref} = state) do
+    {mounts, volume_validate_time} = get_volume_id(state)
     {req, req_connect_time} =
       with_elapsed_ms(fn ->
         Req.post!("#{state.host}/v1/apps/#{state.app}/machines",
@@ -181,7 +239,7 @@ defmodule FLAME.FlyBackend do
             name: "#{state.app}-flame-#{rand_id(20)}",
             config: %{
               image: state.image,
-              mounts: state.mounts,
+              mounts: mounts,
               guest: %{
                 cpu_kind: state.cpu_kind,
                 cpus: state.cpus,
@@ -197,7 +255,7 @@ defmodule FLAME.FlyBackend do
         )
       end)
 
-    remaining_connect_window = state.boot_timeout - req_connect_time
+    remaining_connect_window = state.boot_timeout - req_connect_time - volume_validate_time
 
     case req.body do
       %{"id" => id, "instance_id" => instance_id, "private_ip" => ip} ->
