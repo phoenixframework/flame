@@ -184,6 +184,7 @@ defmodule FLAME.FlyBackend do
               all_vols
               |> Enum.filter(fn vol ->
                 vol["attached_machine_id"] == nil
+                and vol["state"] == "created"
               end)
 
             volume_ids_by_name =
