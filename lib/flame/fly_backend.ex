@@ -169,46 +169,37 @@ defmodule FLAME.FlyBackend do
     {result, div(micro, 1000)}
   end
 
+  defp get_volume_id(%FlyBackend{ mounts: [] }), do: {nil, 0}
   defp get_volume_id(%FlyBackend{ mounts: mounts } = state) when is_list(mounts) do
-    case mounts do
-      [] ->
-        {nil, 0}
-      mounts ->
-        {vols, time} = get_volumes(state)
+        {volumes, time} = get_volumes(state)
 
-        case vols do
+        case volumes do
           [] ->
             {:error, "no volumes to mount"}
-          all_vols ->
-            vols = 
-              all_vols
+          all_volumes ->
+            volume_ids_by_name = 
+              all_volumes
               |> Enum.filter(fn vol ->
                 vol["attached_machine_id"] == nil
                 and vol["state"] == "created"
               end)
+              |> Enum.group_by(&(&1["name"]), &(&1["id"]))
 
-            volume_ids_by_name =
-              vols
-              |> Enum.group_by(fn vol ->
-                vol["name"]
-              end)
-              |> Enum.map(fn {name, vols} ->
-                {name, Enum.map(vols, fn vol -> vol["id"] end)}
-              end)
-
-              {new_mounts, leftover_vols} = Enum.reduce(mounts, {[], volume_ids_by_name}, fn mount, {new_mounts, leftover_vols} ->
-                case Enum.find(leftover_vols, fn {name, ids} -> name == mount.name end) do
-                  nil ->
-                    raise ArgumentError, "not enough fly volumes with the name \"#{mount.name}\" to a FLAME child"
-                  {_, [id | rest]} ->
-                    {new_mount, leftover_vols} = Enum.split(rest, 1)
-                    {new_mounts ++ [%{mount | volume: id}], leftover_vols}
+              new_mounts = Enum.map_reduce(
+                mounts,
+                volume_ids_by_name,
+                fn mount, leftover_vols ->
+                  case List.wrap(leftover_vols[mount.name]) do
+                    [] ->
+                      raise ArgumentError, "not enough fly volumes with the name \"#{mount.name}\" to a FLAME child"
+                    [volume_id | rest] ->
+                      {%{mount | volume: volume_id}, %{leftover_vols | mount.name => rest}}
+                  end
                 end
-              end)
+              )
 
             {new_mounts, time}
         end
-    end
   end
   defp get_volume_id(_) do
     raise ArgumentError, "expected a list of mounts"
@@ -219,7 +210,7 @@ defmodule FLAME.FlyBackend do
         Req.get!("#{state.host}/v1/apps/#{state.app}/volumes",
           connect_options: [timeout: state.boot_timeout],
           retry: false,
-          auth: {:bearer, state.token},
+          auth: {:bearer, state.token}
         )
       end)
 
