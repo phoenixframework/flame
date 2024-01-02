@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.8 (2024-01-02)
+- Fix Pool supervisor name collisions
+
 ## 0.1.7 (2023-12-15)
 - Fix error on concurrent calls when runners are pending
 
