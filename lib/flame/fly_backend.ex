@@ -84,7 +84,8 @@ defmodule FLAME.FlyBackend do
             runner_node_basename: nil,
             runner_instance_id: nil,
             runner_private_ip: nil,
-            runner_node_name: nil
+            runner_node_name: nil,
+            log: nil
 
   @valid_opts ~w(app image token host cpu_kind cpus memory_mb gpu_kind boot_timeout env terminator_sup log services)a
 
@@ -103,7 +104,8 @@ defmodule FLAME.FlyBackend do
       memory_mb: 4096,
       boot_timeout: 30_000,
       runner_node_basename: node_base,
-      services: []
+      services: [],
+      log: Keyword.get(conf, :log, false),
     }
 
     provided_opts =
@@ -194,7 +196,7 @@ defmodule FLAME.FlyBackend do
         )
       end)
 
-    Logger.info("#{inspect(__MODULE__)} @ #{inspect(node())} machine create #{req_connect_time}ms")
+    if state.log, do: Logger.log(state.log, "#{inspect(__MODULE__)} #{inspect(node())} machine create #{req_connect_time}ms")
 
     remaining_connect_window = state.boot_timeout - req_connect_time
 
