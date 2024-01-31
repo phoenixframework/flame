@@ -194,6 +194,8 @@ defmodule FLAME.FlyBackend do
         )
       end)
 
+    Logger.info("#{inspect(__MODULE__)} @ #{inspect(node())} machine create #{req_connect_time}ms")
+
     remaining_connect_window = state.boot_timeout - req_connect_time
 
     case req.body do
