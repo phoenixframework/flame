@@ -69,6 +69,7 @@ defmodule FLAME.FlyBackend do
   defstruct host: nil,
             local_ip: nil,
             env: %{},
+            region: nil,
             cpu_kind: nil,
             cpus: nil,
             memory_mb: nil,
@@ -87,7 +88,7 @@ defmodule FLAME.FlyBackend do
             runner_node_name: nil,
             log: nil
 
-  @valid_opts ~w(app image token host cpu_kind cpus memory_mb gpu_kind boot_timeout env terminator_sup log services)a
+  @valid_opts ~w(app region image token host cpu_kind cpus memory_mb gpu_kind boot_timeout env terminator_sup log services)a
 
   @impl true
   def init(opts) do
@@ -96,6 +97,7 @@ defmodule FLAME.FlyBackend do
 
     default = %FlyBackend{
       app: System.get_env("FLY_APP_NAME"),
+      region: System.get_env("FLY_REGION"),
       image: System.get_env("FLY_IMAGE_REF"),
       token: System.get_env("FLY_API_TOKEN"),
       host: "https://api.machines.dev",
@@ -179,6 +181,7 @@ defmodule FLAME.FlyBackend do
           headers: %{"flame-parent-ip" => "#{state.local_ip}"},
           json: %{
             name: "#{state.app}-flame-#{rand_id(20)}",
+            region: state.region,
             config: %{
               image: state.image,
               guest: %{
