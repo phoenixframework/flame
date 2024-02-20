@@ -172,11 +172,10 @@ defmodule FLAME.Pool do
   See `FLAME.cast/2` for more information.
   """
   def cast(name, func) when is_function(func, 0) do
-    boot_timeout = lookup_boot_timeout(name)
+    %{boot_timeout: boot_timeout, task_sup: task_sup} = lookup_meta(name)
 
-    caller_checkout!(name, [timeout: boot_timeout], :cast, [name, func], fn runner_pid, _ ->
-      {:cancel, :ok, Runner.cast(runner_pid, func)}
-    end)
+    Task.Supervisor.async_nolink(task_sup, fn -> call(name, func, timeout: boot_timeout) end)
+    :ok
   end
 
   @doc """
@@ -261,16 +260,22 @@ defmodule FLAME.Pool do
     end
   end
 
+  defp lookup_meta(name) do
+    :ets.lookup_element(name, :meta, 2)
+  end
+
   defp lookup_boot_timeout(name) do
-    :ets.lookup_element(name, :boot_timeout, 2)
+    %{boot_timeout: timeout} = lookup_meta(name)
+    timeout
   end
 
   @impl true
   def init(opts) do
     name = Keyword.fetch!(opts, :name)
+    task_sup = Keyword.fetch!(opts, :task_sup)
     boot_timeout = Keyword.get(opts, :boot_timeout, @boot_timeout)
     :ets.new(name, [:set, :public, :named_table, read_concurrency: true])
-    :ets.insert(name, {:boot_timeout, boot_timeout})
+    :ets.insert(name, {:meta, %{boot_timeout: boot_timeout, task_sup: task_sup}})
     terminator_sup = Keyword.fetch!(opts, :terminator_sup)
     child_placement_sup = Keyword.fetch!(opts, :child_placement_sup)
     runner_opts = runner_opts(opts, terminator_sup)
@@ -286,7 +291,7 @@ defmodule FLAME.Pool do
 
     state = %Pool{
       runner_sup: Keyword.fetch!(opts, :runner_sup),
-      task_sup: Keyword.fetch!(opts, :task_sup),
+      task_sup: task_sup,
       terminator_sup: terminator_sup,
       child_placement_sup: child_placement_sup,
       name: name,

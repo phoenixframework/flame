@@ -170,10 +170,48 @@ defmodule FLAME.FLAMETest do
     test "normal execution", %{} = config do
       sim_long_running(config.test, 100)
       parent = self()
-      assert FLAME.cast(config.test, fn -> send(parent, {:ran, self()}) end) == :ok
+      assert FLAME.cast(config.test, fn ->
+        send(parent, {:ran, self()})
+        receive do
+          :continue -> :ok
+        end
+      end) == :ok
       assert_receive {:ran, cast_pid}
       Process.monitor(cast_pid)
+      send(cast_pid, :continue)
       assert_receive {:DOWN, _ref, :process, ^cast_pid, :normal}
+    end
+
+    def growth_grow_start(meta) do
+      send(Process.whereis(:current_test), {:grow_start, meta})
+    end
+
+    @tag runner: [
+           min: 0,
+           max: 2,
+           max_concurrency: 1,
+           on_grow_start: &__MODULE__.growth_grow_start/1
+         ]
+    test "pool growth", %{} = config do
+      Process.register(self(), :current_test)
+      parent = self()
+
+      for i <- [1, 2, 3] do
+        assert FLAME.cast(config.test, fn ->
+                 send(parent, {:ran, i, self()})
+                 Process.sleep(500)
+               end) == :ok
+      end
+
+      for i <- [1, 2, 3] do
+        assert_receive {:ran, ^i, cast_pid}
+        Process.monitor(cast_pid)
+        assert_receive {:DOWN, _ref, :process, ^cast_pid, _}, 1000
+      end
+
+      assert_receive {:grow_start, %{count: 1}}, 1000
+      assert_receive {:grow_start, %{count: 2}}, 1000
+      refute_receive {:grow_start, _}, 1000
     end
 
     @tag runner: [min: 1, max: 2, max_concurrency: 2, idle_shutdown_after: 500]
@@ -183,11 +221,14 @@ defmodule FLAME.FLAMETest do
 
       assert FLAME.cast(config.test, fn ->
                send(parent, {:ran, self()})
-               exit(:boom)
+               receive do
+                :continue -> exit(:boom)
+               end
              end) == :ok
 
       assert_receive {:ran, cast_pid}
       Process.monitor(cast_pid)
+      send(cast_pid, :continue)
       assert_receive {:DOWN, _ref, :process, ^cast_pid, :boom}
     end
   end

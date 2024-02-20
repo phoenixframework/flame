@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.9 (2024-02-20)
+- Fix `FLAME.cast/2` allowing more than allowed max_concurrency operations
+- Explicitly prefer local region in `FlyBackend`
+
 ## 0.1.8 (2024-01-02)
 - Fix Pool supervisor name collisions
 
