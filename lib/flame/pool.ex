@@ -172,9 +172,9 @@ defmodule FLAME.Pool do
   See `FLAME.cast/2` for more information.
   """
   def cast(name, func) when is_function(func, 0) do
-    %{boot_timeout: boot_timeout, task_sup: task_sup} = lookup_meta(name)
+    %{task_sup: task_sup} = lookup_meta(name)
 
-    Task.Supervisor.async_nolink(task_sup, fn -> call(name, func, timeout: boot_timeout) end)
+    Task.Supervisor.async_nolink(task_sup, fn -> call(name, func, timeout: :infinity) end)
     :ok
   end
 

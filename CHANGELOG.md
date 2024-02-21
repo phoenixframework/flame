@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.10 (2024-02-21)
+- Fix `FLAME.cast/2` defaulting to boot timeout for executions
+
 ## 0.1.9 (2024-02-20)
 - Fix `FLAME.cast/2` allowing more than allowed max_concurrency operations
 - Explicitly prefer local region in `FlyBackend`
