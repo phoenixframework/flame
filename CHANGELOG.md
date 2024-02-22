@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.11 (2024-02-22)
+- Add ability to configure custom metadata for launch FlyBackend machine
+
 ## 0.1.10 (2024-02-21)
 - Fix `FLAME.cast/2` defaulting to boot timeout for executions
 

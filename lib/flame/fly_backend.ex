@@ -41,6 +41,8 @@ defmodule FLAME.FlyBackend do
     * `:host` – The host of the Fly API. Defaults to `"https://api.machines.dev"`.
 
     * `:services` - The optional services to run on the machine. Defaults to `[]`.
+
+    * `:metadata` - The optional map of metadata to set for the machine. Defaults to `%{}`.
   """
   @behaviour FLAME.Backend
 
@@ -76,6 +78,7 @@ defmodule FLAME.FlyBackend do
             gpu_kind: nil,
             image: nil,
             services: [],
+            metadata: %{},
             app: nil,
             token: nil,
             boot_timeout: nil,
@@ -88,7 +91,23 @@ defmodule FLAME.FlyBackend do
             runner_node_name: nil,
             log: nil
 
-  @valid_opts ~w(app region image token host cpu_kind cpus memory_mb gpu_kind boot_timeout env terminator_sup log services)a
+  @valid_opts [
+    :app,
+    :region,
+    :image,
+    :token,
+    :host,
+    :cpu_kind,
+    :cpus,
+    :memory_mb,
+    :gpu_kind,
+    :boot_timeout,
+    :env,
+    :terminator_sup,
+    :log,
+    :services,
+    :metadata
+  ]
 
   @impl true
   def init(opts) do
@@ -107,7 +126,8 @@ defmodule FLAME.FlyBackend do
       boot_timeout: 30_000,
       runner_node_basename: node_base,
       services: [],
-      log: Keyword.get(conf, :log, false),
+      metadata: %{},
+      log: Keyword.get(conf, :log, false)
     }
 
     provided_opts =
@@ -178,7 +198,6 @@ defmodule FLAME.FlyBackend do
           connect_options: [timeout: state.boot_timeout],
           retry: false,
           auth: {:bearer, state.token},
-          headers: %{"flame-parent-ip" => "#{state.local_ip}"},
           json: %{
             name: "#{state.app}-flame-#{rand_id(20)}",
             region: state.region,
@@ -193,13 +212,19 @@ defmodule FLAME.FlyBackend do
               auto_destroy: true,
               restart: %{policy: "no"},
               env: state.env,
-              services: state.services
+              services: state.services,
+              metadata: Map.put(state.metadata, :flame_parent_ip, state.local_ip)
             }
           }
         )
       end)
 
-    if state.log, do: Logger.log(state.log, "#{inspect(__MODULE__)} #{inspect(node())} machine create #{req_connect_time}ms")
+    if state.log,
+      do:
+        Logger.log(
+          state.log,
+          "#{inspect(__MODULE__)} #{inspect(node())} machine create #{req_connect_time}ms"
+        )
 
     remaining_connect_window = state.boot_timeout - req_connect_time
 
