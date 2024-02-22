@@ -112,7 +112,7 @@ defmodule FLAME.FlyBackend do
   @impl true
   def init(opts) do
     conf = Application.get_env(:flame, __MODULE__) || []
-    [node_base | ip] = node() |> to_string() |> String.split("@")
+    [node_base, ip] = node() |> to_string() |> String.split("@")
 
     default = %FlyBackend{
       app: System.get_env("FLY_APP_NAME"),
