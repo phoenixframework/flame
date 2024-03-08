@@ -170,12 +170,15 @@ defmodule FLAME.FLAMETest do
     test "normal execution", %{} = config do
       sim_long_running(config.test, 100)
       parent = self()
+
       assert FLAME.cast(config.test, fn ->
-        send(parent, {:ran, self()})
-        receive do
-          :continue -> :ok
-        end
-      end) == :ok
+               send(parent, {:ran, self()})
+
+               receive do
+                 :continue -> :ok
+               end
+             end) == :ok
+
       assert_receive {:ran, cast_pid}
       Process.monitor(cast_pid)
       send(cast_pid, :continue)
@@ -221,8 +224,9 @@ defmodule FLAME.FLAMETest do
 
       assert FLAME.cast(config.test, fn ->
                send(parent, {:ran, self()})
+
                receive do
-                :continue -> exit(:boom)
+                 :continue -> exit(:boom)
                end
              end) == :ok
 
