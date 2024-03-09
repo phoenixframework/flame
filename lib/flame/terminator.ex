@@ -184,6 +184,7 @@ defmodule FLAME.Terminator do
 
       {:noreply, new_state}
     else
+      IO.inspect({:DOWN, reason}, label: "[TERMINATOR]")
       {:noreply, drop_caller(state, ref)}
     end
   end
