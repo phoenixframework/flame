@@ -24,6 +24,8 @@ defmodule FLAME.FlyBackend do
 
     * `:cpu_kind` - The size of the runner CPU. Defaults to `"performance"`.
 
+    * `:gpu_kind` - The type of GPU reservation to make`.
+
     * `:cpus` - The number of runner CPUs. Defaults to  `System.schedulers_online()`
       for the number of cores of the running parent app.
 
