@@ -20,7 +20,7 @@ defmodule FLAME.FlyBackend do
   ```
 
   The following backend options are supported, and mirror the
-  (Fly.io machines create API)[https://fly.io/docs/machines/working-with-machines/]:
+  [Fly.io machines create API](https://fly.io/docs/machines/api/machines-resource/#machine-config-object-properties):
 
     * `:cpu_kind` - The size of the runner CPU. Defaults to `"performance"`.
 
