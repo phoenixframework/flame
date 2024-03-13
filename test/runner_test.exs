@@ -205,7 +205,7 @@ defmodule FLAME.RunnerTest do
 
       refute_receive :stopped
       refute_receive {:DOWN, _ref, :process, ^runner, _}
-      assert Runner.call(runner, fn -> :works end, 1234) == :works
+      assert Runner.call(runner, fn -> :works end, timeout: 1234) == :works
       assert Runner.shutdown(runner) == :ok
     end
   end

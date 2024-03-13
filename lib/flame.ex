@@ -172,6 +172,11 @@ defmodule FLAME do
       The executed function will also be terminated on the remote flame if
       the timeout is reached.
 
+    * `:link` – Whether the caller should be linked to the remote call. Defaults to `true`
+      to avoid long-running orphaned resources. Set to `false` to support long-running work
+      that you want to complete within the `:shutdown_timeout` of the remote runner, even
+      when the parent process or node is terminated.
+
   ## Examples
 
     def my_expensive_thing(arg) do
@@ -196,9 +201,17 @@ defmodule FLAME do
 
   @doc """
   Casts a function to a remote runner for the given `FLAME.Pool`.
+
+  ## Options
+
+    * `:link` – Whether the caller should be linked to the remote call. Defaults to `true`
+      to avoid long-running orphaned resources. Set to `false` to support long-running work
+      that you want to complete within the `:shutdown_timeout` of the remote runner, even
+      when the parent process or node is terminated.
   """
-  def cast(pool, func) when is_atom(pool) and is_function(func, 0) do
-    FLAME.Pool.cast(pool, func)
+  def cast(pool, func, opts \\ [])
+      when is_atom(pool) and is_function(func, 0) and is_list(opts) do
+    FLAME.Pool.cast(pool, func, opts)
   end
 
   @doc """
@@ -216,6 +229,18 @@ defmodule FLAME do
   to ensure that the child process is never restarted on the remote node when it
   exits. If you want restart behavior, you need to monitor on the parent node and
   replace the child yourself.
+
+  ## Options
+
+    * `:timeout` - The timeout the caller is willing to wait for a response before an
+      exit with `:timeout`. Defaults to the configured timeout of the pool.
+      The executed function will also be terminated on the remote flame if
+      the timeout is reached.
+
+    * `:link` – Whether the caller should be linked to the remote call. Defaults to `true`
+      to avoid long-running orphaned resources. Set to `false` to support long-running work
+      that you want to complete within the `:shutdown_timeout` of the remote runner, even
+      when the parent process or node is terminated.
 
   Accepts any child spec.
 

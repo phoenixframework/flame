@@ -117,7 +117,12 @@ defmodule FLAME.FLAMETest do
       assert [{:undefined, _pid, :worker, [FLAME.Runner]}] = Supervisor.which_children(runner_sup)
       # max concurrency above threshold tries to boot new runner
       _task2 = sim_long_running(config.test, :infinity)
-      spawn_link(fn -> FLAME.cast(config.test, fn -> send(parent, :fullfilled) end) end)
+
+      spawn_link(fn ->
+        FLAME.cast(config.test, fn -> send(parent, :fullfilled) end)
+        Process.sleep(:infinity)
+      end)
+
       # first attempt fails
       refute_receive :fullfilled
       assert_receive {:grow_start, %{count: 2, pid: pid}}
@@ -163,6 +168,87 @@ defmodule FLAME.FLAMETest do
     assert [{:undefined, runner, :worker, [FLAME.Runner]}] = Supervisor.which_children(runner_sup)
     Process.exit(runner, :brutal_kill)
     assert_receive {:DOWN, _ref, :process, ^active_checkout, :killed}
+  end
+
+  @tag runner: [min: 0, max: 1, max_concurrency: 2, idle_shutdown_after: 50]
+  test "call links", %{runner_sup: runner_sup} = config do
+    ExUnit.CaptureLog.capture_log(fn ->
+      parent = self()
+      # links by defaults
+      Process.flag(:trap_exit, true)
+
+      caught =
+        try do
+          FLAME.call(
+            config.test,
+            fn ->
+              send(parent, {:called, self()})
+              Process.exit(self(), :kill)
+            end
+          )
+        catch
+          kind, reason -> {kind, reason}
+        end
+
+      [{:undefined, runner, :worker, [FLAME.Runner]}] = Supervisor.which_children(runner_sup)
+      Process.monitor(runner)
+      assert {:exit, :killed} = caught
+      assert_receive {:called, _flame_pid}
+      assert_receive {:DOWN, _ref, :process, ^runner, {:shutdown, :idle}}
+
+      # link: false
+      Process.flag(:trap_exit, false)
+      assert Supervisor.which_children(runner_sup) == []
+      parent = self()
+
+      caught =
+        try do
+          FLAME.call(
+            config.test,
+            fn ->
+              send(parent, {:called, self()})
+              raise "boom"
+            end,
+            link: false
+          )
+        catch
+          kind, reason -> {kind, reason}
+        end
+
+      [{:undefined, runner_pid, :worker, [FLAME.Runner]}] = Supervisor.which_children(runner_sup)
+      Process.monitor(runner_pid)
+      assert {:exit, {%RuntimeError{message: "boom"}, _}} = caught
+      assert_receive {:called, flame_pid}
+      Process.monitor(flame_pid)
+      assert_receive {:DOWN, _ref, :process, ^flame_pid, :noproc}
+      assert_receive {:DOWN, _ref, :process, ^runner_pid, {:shutdown, :idle}}
+      assert Supervisor.which_children(runner_sup) == []
+    end)
+  end
+
+  @tag runner: [min: 0, max: 1, max_concurrency: 2, idle_shutdown_after: 50]
+  test "cast with link false", %{runner_sup: runner_sup} = config do
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert Supervisor.which_children(runner_sup) == []
+      parent = self()
+
+      FLAME.cast(
+        config.test,
+        fn ->
+          send(parent, {:called, self()})
+          raise "boom"
+        end,
+        link: false
+      )
+
+      assert_receive {:called, flame_pid}
+      Process.monitor(flame_pid)
+      [{:undefined, runner_pid, :worker, [FLAME.Runner]}] = Supervisor.which_children(runner_sup)
+      assert_receive {:DOWN, _ref, :process, ^flame_pid, :noproc}
+      Process.monitor(runner_pid)
+      assert_receive {:DOWN, _ref, :process, ^runner_pid, {:shutdown, :idle}}
+      assert Supervisor.which_children(runner_sup) == []
+    end)
   end
 
   describe "cast" do
@@ -218,22 +304,25 @@ defmodule FLAME.FLAMETest do
     end
 
     @tag runner: [min: 1, max: 2, max_concurrency: 2, idle_shutdown_after: 500]
-    test "with exit", %{} = config do
-      sim_long_running(config.test, 100)
-      parent = self()
+    test "with exit and default link", %{} = config do
+      ExUnit.CaptureLog.capture_log(fn ->
+        Process.flag(:trap_exit, true)
+        sim_long_running(config.test, 100)
+        parent = self()
 
-      assert FLAME.cast(config.test, fn ->
-               send(parent, {:ran, self()})
+        assert FLAME.cast(config.test, fn ->
+                 send(parent, {:ran, self()})
 
-               receive do
-                 :continue -> exit(:boom)
-               end
-             end) == :ok
+                 receive do
+                   :continue -> exit(:boom)
+                 end
+               end) == :ok
 
-      assert_receive {:ran, cast_pid}
-      Process.monitor(cast_pid)
-      send(cast_pid, :continue)
-      assert_receive {:DOWN, _ref, :process, ^cast_pid, :boom}
+        assert_receive {:ran, cast_pid}
+        Process.monitor(cast_pid)
+        send(cast_pid, :continue)
+        assert_receive {:EXIT, ^cast_pid, :boom}
+      end)
     end
   end
 
@@ -261,6 +350,40 @@ defmodule FLAME.FLAMETest do
 
       # runner does not idle down with active checkout from cast
       refute_receive {:DOWN, _ref, :process, ^runner, _}, 1000
+
+      # runner idles down now that placed child and cast callers are gone
+      assert_receive {:DOWN, _ref, :process, ^runner, _}, 1000
+    end
+
+    @tag runner: [min: 0, max: 2, max_concurrency: 2, idle_shutdown_after: 100]
+    test "place_child links", %{runner_sup: runner_sup} = config do
+      # links by default
+      Process.flag(:trap_exit, true)
+      assert {:ok, pid} = FLAME.place_child(config.test, {Agent, fn -> 1 end})
+
+      assert [{:undefined, runner, :worker, [FLAME.Runner]}] =
+               Supervisor.which_children(runner_sup)
+
+      Process.monitor(runner)
+
+      Process.exit(pid, :kill)
+      assert_receive {:EXIT, ^pid, :killed}, 100
+
+      # runner idles down now that placed child and cast callers are gone
+      assert_receive {:DOWN, _ref, :process, ^runner, _}, 1000
+
+      # with explicit link: false
+      Process.flag(:trap_exit, false)
+      assert {:ok, pid} = FLAME.place_child(config.test, {Agent, fn -> 1 end}, link: false)
+      Process.monitor(pid)
+
+      assert [{:undefined, runner, :worker, [FLAME.Runner]}] =
+               Supervisor.which_children(runner_sup)
+
+      Process.monitor(runner)
+
+      Process.exit(pid, :kill)
+      assert_receive {:DOWN, _ref, :process, ^pid, :killed}, 100
 
       # runner idles down now that placed child and cast callers are gone
       assert_receive {:DOWN, _ref, :process, ^runner, _}, 1000

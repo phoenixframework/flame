@@ -184,7 +184,6 @@ defmodule FLAME.Terminator do
 
       {:noreply, new_state}
     else
-      IO.inspect({:DOWN, reason}, label: "[TERMINATOR]")
       {:noreply, drop_caller(state, ref)}
     end
   end
@@ -266,7 +265,6 @@ defmodule FLAME.Terminator do
       |> cancel_idle_shutdown()
       |> system_stop("terminating")
 
-    IO.inspect(state.calls, label: "[TERMINATE] calls")
     # supervisor will force kill us if we take longer than configured shutdown_timeout
     Enum.each(state.calls, fn
       # skip callers that placed a child since they are on the remote node

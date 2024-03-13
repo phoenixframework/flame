@@ -161,20 +161,47 @@ defmodule FLAME.Pool do
   See `FLAME.call/3` for more information.
   """
   def call(name, func, opts \\ []) when is_function(func, 0) and is_list(opts) do
+    opts = put_link(opts, self())
+    do_call(name, func, opts)
+  end
+
+  # opts are normalized before this to set caller :link
+  defp do_call(name, func, opts) do
     caller_checkout!(name, opts, :call, [name, func, opts], fn runner_pid, remaining_timeout ->
-      {:cancel, :ok, Runner.call(runner_pid, func, remaining_timeout)}
+      opts = Keyword.put_new(opts, :timeout, remaining_timeout)
+      {:cancel, :ok, Runner.call(runner_pid, func, opts)}
     end)
+  end
+
+  defp put_link(opts, pid) do
+    case Keyword.fetch(opts, :link) do
+      {:ok, true} -> Keyword.put(opts, :link, pid)
+      {:ok, val} when val in [false, nil] -> Keyword.put(opts, :link, false)
+      :error -> Keyword.put(opts, :link, pid)
+    end
   end
 
   @doc """
   Casts a function to a remote runner for the given `FLAME.Pool`.
 
-  See `FLAME.cast/2` for more information.
+  See `FLAME.cast/3` for more information.
   """
-  def cast(name, func) when is_function(func, 0) do
+  def cast(name, func, opts) when is_function(func, 0) and is_list(opts) do
     %{task_sup: task_sup} = lookup_meta(name)
 
-    Task.Supervisor.async_nolink(task_sup, fn -> call(name, func, timeout: :infinity) end)
+    opts =
+      opts
+      |> Keyword.put_new(:timeout, :infinity)
+      |> put_link(self())
+
+    # we don't care about the result
+    wrapped = fn ->
+      func.()
+      :ok
+    end
+
+    Task.Supervisor.start_child(task_sup, fn -> do_call(name, wrapped, opts) end)
+
     :ok
   end
 
@@ -184,9 +211,18 @@ defmodule FLAME.Pool do
   def place_child(name, child_spec, opts) do
     caller_checkout!(name, opts, :place_child, [name, child_spec, opts], fn runner_pid,
                                                                             remaining_timeout ->
-      case Runner.place_child(runner_pid, child_spec, opts[:timeout] || remaining_timeout) do
+      place_opts =
+        opts
+        |> Keyword.put(:timeout, opts[:timeout] || remaining_timeout)
+        |> put_link(self())
+
+      case Runner.place_child(runner_pid, child_spec, place_opts) do
         {:ok, child_pid} = result ->
-          Process.link(child_pid)
+          # we are placing the link back on the parent node, but we are protected
+          # from racing the link on the child FLAME because the terminator on
+          # the remote flame is monitoring the caller and will terminator the child
+          # if we go away
+          if place_opts[:link], do: Process.link(child_pid)
           {:cancel, {:replace, child_pid}, result}
 
         :ignore ->
