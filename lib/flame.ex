@@ -247,7 +247,6 @@ defmodule FLAME do
       The executed function will also be terminated on the remote flame if
       the timeout is reached.
 
-
     * `:link` – Whether the caller should be linked to the remote child process
       to prevent long-running orphaned resources. Defaults to `true`. Set to `false` to
       support long-running work that you want to complete within the `:shutdown_timeout`
