@@ -98,10 +98,12 @@ defmodule FLAME.Runner do
     new_spec = Supervisor.child_spec(child_spec, restart: :temporary)
     caller = self()
 
+    link = opts[:link]
+
     call(
       runner_pid,
       fn terminator ->
-        Terminator.place_child(terminator, caller, new_spec)
+        Terminator.place_child(terminator, caller, new_spec, link)
       end,
       opts
     )

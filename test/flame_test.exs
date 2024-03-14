@@ -388,5 +388,57 @@ defmodule FLAME.FLAMETest do
       # runner idles down now that placed child and cast callers are gone
       assert_receive {:DOWN, _ref, :process, ^runner, _}, 1000
     end
+
+    @tag runner: [min: 0, max: 2, max_concurrency: 2, idle_shutdown_after: 100]
+    test "place_child when caller exits", %{runner_sup: runner_sup} = config do
+      # links by default
+      parent = self()
+      caller =
+        spawn(fn ->
+          {:ok, pid} = FLAME.place_child(config.test, {Agent, fn -> 1 end})
+          send(parent, {:child, pid})
+          Process.sleep(:infinity)
+        end)
+
+      assert_receive {:child, placed_child}
+
+      assert [{:undefined, runner, :worker, [FLAME.Runner]}] =
+               Supervisor.which_children(runner_sup)
+
+      Process.monitor(runner)
+      Process.monitor(placed_child)
+
+      Process.exit(caller, :kill)
+
+      assert_receive {:DOWN, _ref, :process, ^placed_child, _}
+      # runner idles down now that placed child and cast callers are gone
+      assert_receive {:DOWN, _ref, :process, ^runner, _}, 1000
+
+      # with link: false
+      caller =
+        spawn(fn ->
+          {:ok, pid} = FLAME.place_child(config.test, {Agent, fn -> 1 end}, link: false)
+          send(parent, {:child, pid})
+          Process.sleep(:infinity)
+        end)
+
+      assert_receive {:child, placed_child}
+
+      assert [{:undefined, runner, :worker, [FLAME.Runner]}] =
+               Supervisor.which_children(runner_sup)
+
+      Process.monitor(runner)
+      Process.monitor(placed_child)
+      Process.exit(caller, :kill)
+
+      refute_receive {:DOWN, _ref, :process, ^placed_child, _}
+      # runner does not idle down when caller goes away since placed child still running
+      refute_receive {:DOWN, _ref, :process, ^runner, _}, 1000
+
+      Process.exit(placed_child, :kill)
+      assert_receive {:DOWN, _ref, :process, ^placed_child, _}
+      # runner idles down now that placed child and cast callers are gone
+      assert_receive {:DOWN, _ref, :process, ^runner, _}, 1000
+    end
   end
 end
