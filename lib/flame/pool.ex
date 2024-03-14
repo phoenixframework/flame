@@ -189,7 +189,8 @@ defmodule FLAME.Pool do
       :ok
     end
 
-    Task.Supervisor.start_child(task_sup, fn -> do_call(name, wrapped, caller_pid, opts) end)
+    {:ok, _pid} =
+      Task.Supervisor.start_child(task_sup, fn -> do_call(name, wrapped, caller_pid, opts) end)
 
     :ok
   end
