@@ -183,7 +183,7 @@ defmodule FLAME.Pool do
     caller_pid = self()
     opts = Keyword.put_new(opts, :timeout, :infinity)
 
-    # we don't care about the result
+    # we don't care about the result so don't copy it back to the caller
     wrapped = fn ->
       func.()
       :ok
