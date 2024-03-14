@@ -28,8 +28,8 @@ end
 Here we wrapped up our CPU expensive `ffmpeg` operation in a `FLAME.call/2`. FLAME accepts a function and any variables that the function closes over. In this example, the `%Video{}` struct and `interval` are passed along automatically. The work happens in a temporary copy of the app. We can do any work inside the FLAME call because we are running the *entire application*, database connection(s) and all.
 
 `FLAME` provides the following interfaces for elastically scaled operations:
-  * `FLAME.call/2` - used for synchronous calls
-  * `FLAME.cast/2` - used for async casts where you don't need to wait on the results
+  * `FLAME.call/3` - used for synchronous calls
+  * `FLAME.cast/3` - used for async casts where you don't need to wait on the results
   * `FLAME.place_child/3` – used for placing a child spec somewhere to run, in place of `DynamicSupervisor.start_child`, `Task.Supervisor.start_child`, etc
 
 The `FLAME.Pool` handles elastically scaling runners up and down, as well as remote monitoring of resources. Check the moduledoc for example usage.

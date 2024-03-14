@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.12 (2024-03-14)
+- Support `link: false` on `FLAME.call/3`, `FLAME.cast/3`, and `FLAME.place_child/3` for opt-in allowance of long-running FLAME operations (up to `:shutdown_timeout`) regardless of what happens to the caller process or caller node.
+
 ## 0.1.11 (2024-02-22)
 - Add ability to configure custom metadata for launch FlyBackend machine
 
