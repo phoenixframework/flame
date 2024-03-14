@@ -159,6 +159,13 @@ defmodule FLAME do
   in your application configuration, such as `config/runtime.exs`:
 
       config :flame, :terminator, shutdown_timeout: :timer.seconds(10)
+
+  *Note*: By default `call/3`, `cast/3`, and `place_child/3` will link the caller
+  to the remote process to prevent orphaned resources when the caller or the caller's node
+  is terminated. This can be disabled by passing `link: false` to the options, which is
+  useful for cases where you want to allow long-running work to complete within the
+  `:shutdown_timeout` of the remote runner, regardless of what happens to the parent caller
+  process and/or the parent caller node, such as a new cold deploy, a caller crash, etc.
   """
   require Logger
 
