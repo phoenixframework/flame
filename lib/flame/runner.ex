@@ -96,14 +96,14 @@ defmodule FLAME.Runner do
       when is_pid(runner_pid) and is_list(opts) do
     # we must rewrite :temporary restart strategy for the spec to avoid restarting placed children
     new_spec = Supervisor.child_spec(child_spec, restart: :temporary)
-    caller = self()
-
-    link = opts[:link]
+    caller_pid = self()
+    link? = Keyword.get(opts, :link, true)
 
     call(
       runner_pid,
+      caller_pid,
       fn terminator ->
-        Terminator.place_child(terminator, caller, new_spec, link)
+        Terminator.place_child(terminator, caller_pid, link?, new_spec)
       end,
       opts
     )
@@ -112,15 +112,9 @@ defmodule FLAME.Runner do
   @doc """
   Calls a function on the remote node.
   """
-  def call(runner_pid, func, opts \\ [])
-      when is_pid(runner_pid) and is_function(func) and is_list(opts) do
-    link_caller_pid =
-      case Keyword.fetch(opts, :link) do
-        {:ok, pid} when is_pid(pid) -> pid
-        {:ok, false} -> false
-        :error -> false
-      end
-
+  def call(runner_pid, caller_pid, func, opts \\ [])
+      when is_pid(runner_pid) and is_pid(caller_pid) and is_function(func) and is_list(opts) do
+    link? = Keyword.get(opts, :link, true)
     timeout = opts[:timeout] || nil
     {ref, %Runner{} = runner, backend_state} = checkout(runner_pid)
     %Runner{terminator: terminator} = runner
@@ -128,8 +122,8 @@ defmodule FLAME.Runner do
 
     result =
       remote_call(runner, backend_state, call_timeout, fn ->
+        if link?, do: Process.link(caller_pid)
         :ok = Terminator.deadline_me(terminator, call_timeout)
-        if link_caller_pid, do: Process.link(link_caller_pid)
         if is_function(func, 1), do: func.(terminator), else: func.()
       end)
 

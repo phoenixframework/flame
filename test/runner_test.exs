@@ -103,7 +103,7 @@ defmodule FLAME.RunnerTest do
       )
 
     assert Runner.remote_boot(runner) == :ok
-    assert Runner.call(runner, fn -> :works end) == :works
+    assert Runner.call(runner, self(), fn -> :works end) == :works
     assert_receive :stopped
   end
 
@@ -112,9 +112,9 @@ defmodule FLAME.RunnerTest do
 
     assert Runner.remote_boot(runner) == :ok
     assert Runner.remote_boot(runner) == {:error, :already_booted}
-    assert Runner.call(runner, fn -> :works end) == :works
+    assert Runner.call(runner, self(), fn -> :works end) == :works
     refute_receive :stopped
-    assert Runner.call(runner, fn -> :still_works end) == :still_works
+    assert Runner.call(runner, self(), fn -> :still_works end) == :still_works
     ref = Process.monitor(runner)
     assert Runner.shutdown(runner) == :ok
     assert_receive :stopped
@@ -153,7 +153,7 @@ defmodule FLAME.RunnerTest do
     test "single use" do
       {:ok, runner} = mock_successful_runner(3, single_use: true)
       assert Runner.remote_boot(runner) == :ok
-      error = wrap_exit(runner, fn -> Runner.call(runner, fn -> raise "boom" end) end)
+      error = wrap_exit(runner, fn -> Runner.call(runner, self(), fn -> raise "boom" end) end)
       assert {:exit, {%RuntimeError{message: "boom"}, _}} = error
       assert_receive :stopped
       assert Runner.shutdown(runner) == :ok
@@ -164,11 +164,11 @@ defmodule FLAME.RunnerTest do
       Process.monitor(runner)
       assert Runner.remote_boot(runner) == :ok
 
-      error = wrap_exit(runner, fn -> Runner.call(runner, fn -> raise "boom" end) end)
+      error = wrap_exit(runner, fn -> Runner.call(runner, self(), fn -> raise "boom" end) end)
       assert {:exit, {%RuntimeError{message: "boom"}, _}} = error
       refute_receive :stopped
       refute_receive {:DOWN, _ref, :process, ^runner, _}
-      assert Runner.call(runner, fn -> :works end) == :works
+      assert Runner.call(runner, self(), fn -> :works end) == :works
       assert Runner.shutdown(runner) == :ok
     end
   end
@@ -182,7 +182,7 @@ defmodule FLAME.RunnerTest do
       assert Runner.remote_boot(runner) == :ok
 
       error =
-        wrap_exit(runner, fn -> Runner.call(runner, fn -> Process.sleep(timeout * 2) end) end)
+        wrap_exit(runner, fn -> Runner.call(runner, self(), fn -> Process.sleep(timeout * 2) end) end)
 
       assert error == {:exit, :timeout}
 
@@ -199,13 +199,13 @@ defmodule FLAME.RunnerTest do
       assert Runner.remote_boot(runner) == :ok
 
       error =
-        wrap_exit(runner, fn -> Runner.call(runner, fn -> Process.sleep(timeout * 2) end) end)
+        wrap_exit(runner, fn -> Runner.call(runner, self(), fn -> Process.sleep(timeout * 2) end) end)
 
       assert error == {:exit, :timeout}
 
       refute_receive :stopped
       refute_receive {:DOWN, _ref, :process, ^runner, _}
-      assert Runner.call(runner, fn -> :works end, timeout: 1234) == :works
+      assert Runner.call(runner, self(), fn -> :works end, timeout: 1234) == :works
       assert Runner.shutdown(runner) == :ok
     end
   end
@@ -226,7 +226,7 @@ defmodule FLAME.RunnerTest do
       Process.unlink(runner)
       Process.monitor(runner)
       assert Runner.remote_boot(runner) == :ok
-      assert Runner.call(runner, fn -> :works end) == :works
+      assert Runner.call(runner, self(), fn -> :works end) == :works
       assert_receive :stopped, timeout * 2
       assert_receive {:DOWN, _ref, :process, ^runner, _}
     end

@@ -161,24 +161,15 @@ defmodule FLAME.Pool do
   See `FLAME.call/3` for more information.
   """
   def call(name, func, opts \\ []) when is_function(func, 0) and is_list(opts) do
-    opts = put_link(opts, self())
-    do_call(name, func, opts)
+    caller_pid = self()
+    do_call(name, func, caller_pid, opts)
   end
 
-  # opts are normalized before this to set caller :link
-  defp do_call(name, func, opts) do
+  defp do_call(name, func, caller_pid, opts) when is_pid(caller_pid) do
     caller_checkout!(name, opts, :call, [name, func, opts], fn runner_pid, remaining_timeout ->
       opts = Keyword.put_new(opts, :timeout, remaining_timeout)
-      {:cancel, :ok, Runner.call(runner_pid, func, opts)}
+      {:cancel, :ok, Runner.call(runner_pid, caller_pid, func, opts)}
     end)
-  end
-
-  defp put_link(opts, pid) do
-    case Keyword.fetch(opts, :link) do
-      {:ok, true} -> Keyword.put(opts, :link, pid)
-      {:ok, val} when val in [false, nil] -> Keyword.put(opts, :link, false)
-      :error -> Keyword.put(opts, :link, pid)
-    end
   end
 
   @doc """
@@ -189,10 +180,8 @@ defmodule FLAME.Pool do
   def cast(name, func, opts) when is_function(func, 0) and is_list(opts) do
     %{task_sup: task_sup} = lookup_meta(name)
 
-    opts =
-      opts
-      |> Keyword.put_new(:timeout, :infinity)
-      |> put_link(self())
+    caller_pid = self()
+    opts = Keyword.put_new(opts, :timeout, :infinity)
 
     # we don't care about the result
     wrapped = fn ->
@@ -200,7 +189,7 @@ defmodule FLAME.Pool do
       :ok
     end
 
-    Task.Supervisor.start_child(task_sup, fn -> do_call(name, wrapped, opts) end)
+    Task.Supervisor.start_child(task_sup, fn -> do_call(name, wrapped, caller_pid, opts) end)
 
     :ok
   end
@@ -214,7 +203,7 @@ defmodule FLAME.Pool do
       place_opts =
         opts
         |> Keyword.put(:timeout, opts[:timeout] || remaining_timeout)
-        |> put_link(self())
+        |> Keyword.put_new(:link, true)
 
       case Runner.place_child(runner_pid, child_spec, place_opts) do
         {:ok, child_pid} = result ->
@@ -222,7 +211,7 @@ defmodule FLAME.Pool do
           # from racing the link on the child FLAME because the terminator on
           # the remote flame is monitoring the caller and will terminator the child
           # if we go away
-          if place_opts[:link], do: Process.link(child_pid)
+          if Keyword.fetch!(place_opts, :link), do: Process.link(child_pid)
           {:cancel, {:replace, child_pid}, result}
 
         :ignore ->

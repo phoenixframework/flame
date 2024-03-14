@@ -78,11 +78,10 @@ defmodule FLAME.Terminator do
     GenServer.call(terminator, :system_shutdown)
   end
 
-  def place_child(terminator, caller, child_spec, link) when is_pid(caller) do
+  def place_child(terminator, caller, link?, child_spec) when is_pid(caller) and is_boolean(link?) do
     dynamic_sup = FLAME.Terminator.Supervisor.child_placement_sup_name(terminator)
     %{start: start} = child_spec = Supervisor.child_spec(child_spec, [])
     gl = Process.group_leader()
-    link? = is_pid(link)
     rewritten_start = {__MODULE__, :start_child_inside_sup, [start, terminator, caller, link?, gl]}
     wrapped_child_spec = %{child_spec | start: rewritten_start}
     DynamicSupervisor.start_child(dynamic_sup, wrapped_child_spec)
