@@ -182,7 +182,9 @@ defmodule FLAME.RunnerTest do
       assert Runner.remote_boot(runner) == :ok
 
       error =
-        wrap_exit(runner, fn -> Runner.call(runner, self(), fn -> Process.sleep(timeout * 2) end) end)
+        wrap_exit(runner, fn ->
+          Runner.call(runner, self(), fn -> Process.sleep(timeout * 2) end)
+        end)
 
       assert error == {:exit, :timeout}
 
@@ -199,7 +201,9 @@ defmodule FLAME.RunnerTest do
       assert Runner.remote_boot(runner) == :ok
 
       error =
-        wrap_exit(runner, fn -> Runner.call(runner, self(), fn -> Process.sleep(timeout * 2) end) end)
+        wrap_exit(runner, fn ->
+          Runner.call(runner, self(), fn -> Process.sleep(timeout * 2) end)
+        end)
 
       assert error == {:exit, :timeout}
 

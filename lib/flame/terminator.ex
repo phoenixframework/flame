@@ -78,11 +78,15 @@ defmodule FLAME.Terminator do
     GenServer.call(terminator, :system_shutdown)
   end
 
-  def place_child(terminator, caller, link?, child_spec) when is_pid(caller) and is_boolean(link?) do
+  def place_child(terminator, caller, link?, child_spec)
+      when is_pid(caller) and is_boolean(link?) do
     dynamic_sup = FLAME.Terminator.Supervisor.child_placement_sup_name(terminator)
     %{start: start} = child_spec = Supervisor.child_spec(child_spec, [])
     gl = Process.group_leader()
-    rewritten_start = {__MODULE__, :start_child_inside_sup, [start, terminator, caller, link?, gl]}
+
+    rewritten_start =
+      {__MODULE__, :start_child_inside_sup, [start, terminator, caller, link?, gl]}
+
     wrapped_child_spec = %{child_spec | start: rewritten_start}
     DynamicSupervisor.start_child(dynamic_sup, wrapped_child_spec)
   end
@@ -227,8 +231,12 @@ defmodule FLAME.Terminator do
 
     new_state =
       new_state
-      |> update_caller(child_ref, fn child -> %Caller{child | placed_caller_ref: caller_ref, link?: link?} end)
-      |> update_caller(caller_ref, fn caller -> %Caller{caller | placed_child_ref: child_ref, link?: link?} end)
+      |> update_caller(child_ref, fn child ->
+        %Caller{child | placed_caller_ref: caller_ref, link?: link?}
+      end)
+      |> update_caller(caller_ref, fn caller ->
+        %Caller{caller | placed_child_ref: child_ref, link?: link?}
+      end)
 
     {:reply, {:ok, child_pid}, new_state}
   end

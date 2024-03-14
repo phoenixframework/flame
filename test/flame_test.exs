@@ -393,6 +393,7 @@ defmodule FLAME.FLAMETest do
     test "place_child when caller exits", %{runner_sup: runner_sup} = config do
       # links by default
       parent = self()
+
       caller =
         spawn(fn ->
           {:ok, pid} = FLAME.place_child(config.test, {Agent, fn -> 1 end})
