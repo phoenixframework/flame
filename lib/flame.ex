@@ -151,7 +151,7 @@ defmodule FLAME do
         ...
       end
 
-  ## Termination
+  ## Termination and remote links
 
   FLAME runs a termination process to allow remotely spawned functions time to
   complete before the node is terminated. This process is started automatically
@@ -159,6 +159,13 @@ defmodule FLAME do
   in your application configuration, such as `config/runtime.exs`:
 
       config :flame, :terminator, shutdown_timeout: :timer.seconds(10)
+
+  *Note*: By default `call/3`, `cast/3`, and `place_child/3` will link the caller
+  to the remote process to prevent orphaned resources when the caller or the caller's node
+  is terminated. This can be disabled by passing `link: false` to the options, which is
+  useful for cases where you want to allow long-running work to complete within the
+  `:shutdown_timeout` of the remote runner, regardless of what happens to the parent caller
+  process and/or the parent caller node, such as a new cold deploy, a caller crash, etc.
   """
   require Logger
 
@@ -171,6 +178,14 @@ defmodule FLAME do
       exit with `:timeout`. Defaults to the configured timeout of the pool.
       The executed function will also be terminated on the remote flame if
       the timeout is reached.
+
+    * `:link` – Whether the caller should be linked to the remote call process
+      to prevent long-running orphaned resources. Defaults to `true`. Set to `false` to
+      support long-running work that you want to complete within the `:shutdown_timeout`
+      of the remote runner, even when the parent process or node is terminated.
+      *Note*: even when `link: false` is used, an exit in the remote process will raise
+      an error on the caller. The caller will need to try/catch the call if they wish
+      to handle the error.
 
   ## Examples
 
@@ -196,9 +211,17 @@ defmodule FLAME do
 
   @doc """
   Casts a function to a remote runner for the given `FLAME.Pool`.
+
+  ## Options
+
+    * `:link` – Whether the caller should be linked to the remote cast process
+      to prevent long-running orphaned resources. Defaults to `true`. Set to `false` to
+      support long-running work that you want to complete within the `:shutdown_timeout`
+      of the remote runner, even when the parent process or node is terminated.
   """
-  def cast(pool, func) when is_atom(pool) and is_function(func, 0) do
-    FLAME.Pool.cast(pool, func)
+  def cast(pool, func, opts \\ [])
+      when is_atom(pool) and is_function(func, 0) and is_list(opts) do
+    FLAME.Pool.cast(pool, func, opts)
   end
 
   @doc """
@@ -216,6 +239,18 @@ defmodule FLAME do
   to ensure that the child process is never restarted on the remote node when it
   exits. If you want restart behavior, you need to monitor on the parent node and
   replace the child yourself.
+
+  ## Options
+
+    * `:timeout` - The timeout the caller is willing to wait for a response before an
+      exit with `:timeout`. Defaults to the configured timeout of the pool.
+      The executed function will also be terminated on the remote flame if
+      the timeout is reached.
+
+    * `:link` – Whether the caller should be linked to the remote child process
+      to prevent long-running orphaned resources. Defaults to `true`. Set to `false` to
+      support long-running work that you want to complete within the `:shutdown_timeout`
+      of the remote runner, even when the parent process or node is terminated.
 
   Accepts any child spec.
 

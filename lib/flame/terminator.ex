@@ -1,5 +1,5 @@
 defmodule FLAME.Terminator.Caller do
-  defstruct from_pid: nil, timer: nil, placed_child_ref: nil, placed_caller_ref: nil
+  defstruct from_pid: nil, timer: nil, placed_child_ref: nil, placed_caller_ref: nil, link?: false
 end
 
 defmodule FLAME.Terminator do
@@ -78,11 +78,15 @@ defmodule FLAME.Terminator do
     GenServer.call(terminator, :system_shutdown)
   end
 
-  def place_child(terminator, caller, child_spec) when is_pid(caller) do
+  def place_child(terminator, caller, link?, child_spec)
+      when is_pid(caller) and is_boolean(link?) do
     dynamic_sup = FLAME.Terminator.Supervisor.child_placement_sup_name(terminator)
     %{start: start} = child_spec = Supervisor.child_spec(child_spec, [])
     gl = Process.group_leader()
-    rewritten_start = {__MODULE__, :start_child_inside_sup, [start, terminator, caller, gl]}
+
+    rewritten_start =
+      {__MODULE__, :start_child_inside_sup, [start, terminator, caller, link?, gl]}
+
     wrapped_child_spec = %{child_spec | start: rewritten_start}
     DynamicSupervisor.start_child(dynamic_sup, wrapped_child_spec)
   end
@@ -92,7 +96,7 @@ defmodule FLAME.Terminator do
   # the DynamicSupervisor child inside the child placement supervisor, and notifies the
   # terminator via the {:placed_child, caller, child_pid} message.
   # This approach allows the caller to place the child outside of terminator, safely.
-  def start_child_inside_sup({mod, fun, args}, terminator, caller, gl) do
+  def start_child_inside_sup({mod, fun, args}, terminator, caller, link?, gl) do
     # We switch the group leader, so that the newly started
     # process gets the same group leader as the caller
     initial_gl = Process.group_leader()
@@ -106,7 +110,7 @@ defmodule FLAME.Terminator do
           resp -> {resp, nil}
         end
 
-      if pid, do: GenServer.call(terminator, {:placed_child, caller, pid})
+      if pid, do: GenServer.call(terminator, {:placed_child, caller, pid, link?})
 
       resp
     after
@@ -221,14 +225,18 @@ defmodule FLAME.Terminator do
   end
 
   @impl true
-  def handle_call({:placed_child, caller, child_pid}, _from, %Terminator{} = state) do
+  def handle_call({:placed_child, caller, child_pid, link?}, _from, %Terminator{} = state) do
     {child_ref, new_state} = deadline_caller(state, child_pid, :infinity)
     {caller_ref, new_state} = deadline_caller(new_state, caller, :infinity)
 
     new_state =
       new_state
-      |> update_caller(child_ref, fn child -> %Caller{child | placed_caller_ref: caller_ref} end)
-      |> update_caller(caller_ref, fn caller -> %Caller{caller | placed_child_ref: child_ref} end)
+      |> update_caller(child_ref, fn child ->
+        %Caller{child | placed_caller_ref: caller_ref, link?: link?}
+      end)
+      |> update_caller(caller_ref, fn caller ->
+        %Caller{caller | placed_child_ref: child_ref, link?: link?}
+      end)
 
     {:reply, {:ok, child_pid}, new_state}
   end
@@ -304,14 +312,18 @@ defmodule FLAME.Terminator do
     if caller.timer, do: Process.cancel_timer(caller.timer)
     state = %Terminator{state | calls: Map.delete(state.calls, ref)}
 
-    # if the caller going down was one that placed a child, and the child is still tracked,
-    # terminate the child. there is no need to notify the og caller, as they linked themselves.
+    # if the caller going down was one that placed a child, and the child is still tracked:
+    #  - if the child is not linked (link: false), do nothing
+    #  - if the child is linked, terminate the child. there is no need to notify the og caller,
+    #   as they linked themselves.
+    #
     # Note: there is also a race where we can't rely on the link to have happened to so we
     # must monitor in the terminator even with the remote link
     state =
       with placed_child_ref <- caller.placed_child_ref,
            true <- is_reference(placed_child_ref),
-           %{^placed_child_ref => %Caller{} = placed_child} <- state.calls do
+           %{^placed_child_ref => %Caller{} = placed_child} <- state.calls,
+           true <- placed_child.link? do
         if placed_child.timer, do: Process.cancel_timer(placed_child.timer)
         Process.demonitor(placed_child_ref, [:flush])
         DynamicSupervisor.terminate_child(state.child_placement_sup, placed_child.from_pid)

@@ -12,7 +12,6 @@ defmodule FLAME.Runner do
   #     {:ok, runner} = Runner.start_link(backend: FLAME.FlyBackend)
   #     :ok = Runner.remote_boot(runner)
   #     Runner.call(runner, fn -> :operation1 end)
-  #     Runner.cast(runner, fn -> :operation2 end)
   #     Runner.shutdown(runner)
   #
   # When a caller exits or crashes, the remote node will automatically be terminated.
@@ -93,34 +92,38 @@ defmodule FLAME.Runner do
   to ensure that the child is not restarted if it exits. If you want restart
   behavior, you must monitor the process yourself on the parent node and replace it.
   """
-  def place_child(runner_pid, child_spec, timeout)
-      when is_pid(runner_pid) and (is_integer(timeout) or timeout in [:infinity, nil]) do
+  def place_child(runner_pid, child_spec, opts)
+      when is_pid(runner_pid) and is_list(opts) do
     # we must rewrite :temporary restart strategy for the spec to avoid restarting placed children
     new_spec = Supervisor.child_spec(child_spec, restart: :temporary)
-    caller = self()
+    caller_pid = self()
+    link? = Keyword.get(opts, :link, true)
 
     call(
       runner_pid,
+      caller_pid,
       fn terminator ->
-        Terminator.place_child(terminator, caller, new_spec)
+        Terminator.place_child(terminator, caller_pid, link?, new_spec)
       end,
-      timeout
+      opts
     )
   end
 
   @doc """
   Calls a function on the remote node.
   """
-  def call(runner_pid, func, timeout \\ nil) when is_pid(runner_pid) and is_function(func) do
+  def call(runner_pid, caller_pid, func, opts \\ [])
+      when is_pid(runner_pid) and is_pid(caller_pid) and is_function(func) and is_list(opts) do
+    link? = Keyword.get(opts, :link, true)
+    timeout = opts[:timeout] || nil
     {ref, %Runner{} = runner, backend_state} = checkout(runner_pid)
     %Runner{terminator: terminator} = runner
     call_timeout = timeout || runner.timeout
-    caller_pid = self()
 
     result =
       remote_call(runner, backend_state, call_timeout, fn ->
+        if link?, do: Process.link(caller_pid)
         :ok = Terminator.deadline_me(terminator, call_timeout)
-        Process.link(caller_pid)
         if is_function(func, 1), do: func.(terminator), else: func.()
       end)
 
@@ -138,25 +141,6 @@ defmodule FLAME.Runner do
           :throw -> throw(reason)
         end
     end
-  end
-
-  @doc """
-  Casts a function to the remote node.
-  """
-  def cast(runner_pid, func) when is_pid(runner_pid) and is_function(func, 0) do
-    {ref, runner, backend_state} = checkout(runner_pid)
-
-    %Runner{backend: backend, timeout: timeout, terminator: terminator} =
-      runner
-
-    {:ok, {_remote_pid, _remote_monitor_ref}} =
-      backend.remote_spawn_monitor(backend_state, fn ->
-        # This runs on the remote node
-        :ok = Terminator.deadline_me(terminator, timeout)
-        func.()
-      end)
-
-    :ok = checkin(runner_pid, ref)
   end
 
   defp checkout(runner_pid) do
