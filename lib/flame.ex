@@ -151,7 +151,7 @@ defmodule FLAME do
         ...
       end
 
-  ## Termination
+  ## Termination and remote links
 
   FLAME runs a termination process to allow remotely spawned functions time to
   complete before the node is terminated. This process is started automatically
@@ -183,6 +183,9 @@ defmodule FLAME do
       to prevent long-running orphaned resources. Defaults to `true`. Set to `false` to
       support long-running work that you want to complete within the `:shutdown_timeout`
       of the remote runner, even when the parent process or node is terminated.
+      *Note*: even when `link: false` is used, an exit in the remote process will raise
+      an error on the caller. The caller will need to try/catch the call if they wish
+      to handle the error.
 
   ## Examples
 
