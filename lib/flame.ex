@@ -172,10 +172,10 @@ defmodule FLAME do
       The executed function will also be terminated on the remote flame if
       the timeout is reached.
 
-    * `:link` – Whether the caller should be linked to the remote call. Defaults to `true`
-      to avoid long-running orphaned resources. Set to `false` to support long-running work
-      that you want to complete within the `:shutdown_timeout` of the remote runner, even
-      when the parent process or node is terminated.
+    * `:link` – Whether the caller should be linked to the remote call process
+      to prevent long-running orphaned resources. Defaults to `true`. Set to `false` to
+      support long-running work that you want to complete within the `:shutdown_timeout`
+      of the remote runner, even when the parent process or node is terminated.
 
   ## Examples
 
@@ -204,10 +204,10 @@ defmodule FLAME do
 
   ## Options
 
-    * `:link` – Whether the caller should be linked to the remote call. Defaults to `true`
-      to avoid long-running orphaned resources. Set to `false` to support long-running work
-      that you want to complete within the `:shutdown_timeout` of the remote runner, even
-      when the parent process or node is terminated.
+    * `:link` – Whether the caller should be linked to the remote cast process
+      to prevent long-running orphaned resources. Defaults to `true`. Set to `false` to
+      support long-running work that you want to complete within the `:shutdown_timeout`
+      of the remote runner, even when the parent process or node is terminated.
   """
   def cast(pool, func, opts \\ [])
       when is_atom(pool) and is_function(func, 0) and is_list(opts) do
@@ -237,10 +237,11 @@ defmodule FLAME do
       The executed function will also be terminated on the remote flame if
       the timeout is reached.
 
-    * `:link` – Whether the caller should be linked to the remote call. Defaults to `true`
-      to avoid long-running orphaned resources. Set to `false` to support long-running work
-      that you want to complete within the `:shutdown_timeout` of the remote runner, even
-      when the parent process or node is terminated.
+
+    * `:link` – Whether the caller should be linked to the remote child process
+      to prevent long-running orphaned resources. Defaults to `true`. Set to `false` to
+      support long-running work that you want to complete within the `:shutdown_timeout`
+      of the remote runner, even when the parent process or node is terminated.
 
   Accepts any child spec.
 
