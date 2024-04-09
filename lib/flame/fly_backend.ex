@@ -43,6 +43,31 @@ defmodule FLAME.FlyBackend do
     * `:services` - The optional services to run on the machine. Defaults to `[]`.
 
     * `:metadata` - The optional map of metadata to set for the machine. Defaults to `%{}`.
+
+  ## Environment Variables
+
+  The FLAME Fly machines do *do not* inherit the environment variables of the parent.
+  You must explicit provide the environment that you would like to forward to the
+  machine. For example, if your FLAME's are starting your Ecto repos, you can copy
+  the env from the parent:
+
+  ```elixir
+  config :flame, FLAME.FlyBackend,
+    token: System.fetch_env!("FLY_API_TOKEN"),
+    env: %{
+      "DATABASE_URL" => System.fetch_env!("DATABASE_URL")
+      "POOL_SIZE" => "1"
+    }
+  ```
+
+  Or pass the env to each pool:
+
+  ```elixir
+  {FLAME.Pool,
+    name: MyRunner,
+    backend: {FLAME.FlyBackend, env: %{"DATABASE_URL" => System.fetch_env!("DATABASE_URL")}}
+  }
+  ```
   """
   @behaviour FLAME.Backend
 
