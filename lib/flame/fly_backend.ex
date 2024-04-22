@@ -20,9 +20,11 @@ defmodule FLAME.FlyBackend do
   ```
 
   The following backend options are supported, and mirror the
-  (Fly.io machines create API)[https://fly.io/docs/machines/working-with-machines/]:
+  [Fly.io machines create API](https://fly.io/docs/machines/api/machines-resource/#machine-config-object-properties):
 
     * `:cpu_kind` - The size of the runner CPU. Defaults to `"performance"`.
+
+    * `:gpu_kind` - The type of GPU reservation to make`.
 
     * `:cpus` - The number of runner CPUs. Defaults to  `System.schedulers_online()`
       for the number of cores of the running parent app.
