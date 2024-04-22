@@ -1,5 +1,8 @@
 defmodule FLAME.LocalBackend do
-  @moduledoc false
+  @moduledoc """
+  A `FLAME.Backend` useful for development and testing.
+  """
+
   @behaviour FLAME.Backend
 
   @impl true
