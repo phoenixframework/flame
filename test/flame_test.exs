@@ -58,6 +58,32 @@ defmodule FLAME.FLAMETest do
     assert new_pool == Supervisor.which_children(runner_sup)
   end
 
+  @tag runner: [min: 1, max: 2, max_concurrency: 8, hotstart_threshold: 0.5]
+  test "init boots min runners  and grows on demand",
+       %{runner_sup: runner_sup} = config do
+    min_pool = Supervisor.which_children(runner_sup)
+    assert [{:undefined, _pid, :worker, [FLAME.Runner]}] = min_pool
+    # execute against single runner
+    assert FLAME.call(config.test, fn -> :works end) == :works
+
+    # dynamically grows to max
+    _task1 = sim_long_running(config.test)
+    assert FLAME.call(config.test, fn -> :works end) == :works
+    assert Supervisor.which_children(runner_sup) == min_pool
+    _task2 = sim_long_running(config.test)
+    assert FLAME.call(config.test, fn -> :works end) == :works
+    _task3 = sim_long_running(config.test)
+    _task4 = sim_long_running(config.test)
+    _task5 = sim_long_running(config.test)
+    assert FLAME.call(config.test, fn -> :works end) == :works
+    # concurrency above hotstart threshold boots new runner
+    new_pool = Supervisor.which_children(runner_sup)
+    refute new_pool == min_pool
+    assert length(new_pool) == 2
+    # caller is now queued while waiting for available runner
+    assert new_pool == Supervisor.which_children(runner_sup)
+  end
+
   @tag runner: [min: 0, max: 1, max_concurrency: 2]
   test "concurrent calls on fully pending runners",
        %{runner_sup: runner_sup} = config do
