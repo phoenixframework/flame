@@ -122,7 +122,7 @@ defmodule FLAME.Terminator do
   def init(opts) do
     Process.flag(:trap_exit, true)
     failsafe_timeout = Keyword.get(opts, :failsafe_timeout, 20_000)
-    log = Keyword.get(opts, :log, false)
+    log = :info #Keyword.get(opts, :log, false)
 
     case opts[:parent] || FLAME.Parent.get() do
       nil ->
