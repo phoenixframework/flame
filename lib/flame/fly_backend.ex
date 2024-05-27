@@ -260,8 +260,7 @@ defmodule FLAME.FlyBackend do
             state
             | runner_id: id,
               runner_instance_id: instance_id,
-              runner_private_ip: ip,
-              runner_node_name: :"#{state.runner_node_basename}@#{ip}"
+              runner_private_ip: ip
           }
 
         remote_terminator_pid =
@@ -274,7 +273,12 @@ defmodule FLAME.FlyBackend do
               exit(:timeout)
           end
 
-        new_state = %FlyBackend{new_state | remote_terminator_pid: remote_terminator_pid}
+        new_state = %FlyBackend{
+          new_state
+          | remote_terminator_pid: remote_terminator_pid,
+            runner_node_name: node(remote_terminator_pid)
+        }
+
         {:ok, remote_terminator_pid, new_state}
 
       other ->
