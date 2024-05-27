@@ -266,6 +266,7 @@ defmodule FLAME.FlyBackend do
         remote_terminator_pid =
           receive do
             {^parent_ref, {:remote_up, remote_terminator_pid}} ->
+              Logger.info("#{inspect(remote_terminator_pid)} up from node #{inspect(node(remote_terminator_pid))}")
               remote_terminator_pid
           after
             remaining_connect_window ->
