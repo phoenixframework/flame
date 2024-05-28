@@ -43,11 +43,11 @@ defmodule FLAME.FlyBackend do
     * `:init` – The init object to pass to the machines create endpoint. Defaults to `%{}`.
       Possible values include:
 
-        * `:cmd` – array string[]
-        * `:entrypoint` – array string[]
-        * `:exec` – array string[]
-        * `:kernel_args` - array string[]
-        * `:swap_size_mb` – integer
+        * `:cmd` – list of strings for the command
+        * `:entrypoint` – list strings for the entrypoint command
+        * `:exec` – list of strings for the exec command
+        * `:kernel_args` - list of strings
+        * `:swap_size_mb` – integer value in megabytes for th swap size
         * `:tty` – boolean
 
     * `:services` - The optional services to run on the machine. Defaults to `[]`.
@@ -285,10 +285,6 @@ defmodule FLAME.FlyBackend do
         remote_terminator_pid =
           receive do
             {^parent_ref, {:remote_up, remote_terminator_pid}} ->
-              Logger.info(
-                "#{inspect(remote_terminator_pid)} up from node #{inspect(node(remote_terminator_pid))}"
-              )
-
               remote_terminator_pid
           after
             remaining_connect_window ->

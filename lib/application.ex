@@ -14,7 +14,6 @@ defmodule FLAME.Application do
     children = [
       Supervisor.child_spec({FLAME.Terminator, opts}, shutdown: shutdown)
     ]
-    Logger.info("starting FLAME #{inspect(children)}")
 
     opts = [strategy: :one_for_one, name: FLAME.Supervisor]
     Supervisor.start_link(children, opts)
