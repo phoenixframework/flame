@@ -323,8 +323,8 @@ defmodule FLAME.FlyBackend do
       {:ok, {{_, 200, _}, _, response_body}} ->
         Jason.decode!(response_body)
 
-      {:ok, {{_, status, _status_reason}, _, resp_body}} ->
-        raise "failed POST #{url} with #{inspect(status)}: #{inspect(resp_body)}"
+      {:ok, {{_, status, reason}, _, resp_body}} ->
+        raise "failed POST #{url} with #{inspect(status)} (#{inspect(reason)}): #{inspect(resp_body)} #{inspect(headers)}"
 
       {:error, reason} ->
         raise "failed POST #{url} with #{inspect(reason)}"
