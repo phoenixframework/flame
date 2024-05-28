@@ -222,8 +222,8 @@ defmodule FLAME.FlyBackend do
         http_post!("#{state.host}/v1/apps/#{state.app}/machines",
           content_type: "application/json",
           headers: [
-            {~c"Content-Type", "application/json"},
-            {~c"Authorization", "Bearer #{state.token}"}
+            {"Content-Type", "application/json"},
+            {"Authorization", "Bearer #{state.token}"}
           ],
           connect_timeout: state.boot_timeout,
           body:
@@ -300,7 +300,11 @@ defmodule FLAME.FlyBackend do
 
   defp http_post!(url, opts) do
     Keyword.validate!(opts, [:headers, :body, :connect_timeout, :content_type])
-    headers = Keyword.fetch!(opts, :headers)
+
+    headers =
+      for {field, val} <- Keyword.fetch!(opts, :headers),
+          do: {String.to_charlist(field), val}
+
     body = Keyword.fetch!(opts, :body)
     connect_timeout = Keyword.fetch!(opts, :connect_timeout)
     content_type = Keyword.fetch!(opts, :content_type)
@@ -317,9 +321,7 @@ defmodule FLAME.FlyBackend do
       connect_timeout: connect_timeout
     ]
 
-    :httpc.set_options(http_opts)
-
-    case :httpc.request(:post, {url, headers, ~c"#{content_type}", body}, [], []) do
+    case :httpc.request(:post, {url, headers, ~c"#{content_type}", body}, http_opts, []) do
       {:ok, {{_, 200, _}, _, response_body}} ->
         Jason.decode!(response_body)
 
