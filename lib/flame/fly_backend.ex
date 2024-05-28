@@ -217,30 +217,34 @@ defmodule FLAME.FlyBackend do
 
   @impl true
   def remote_boot(%FlyBackend{parent_ref: parent_ref} = state) do
-    {req, req_connect_time} =
+    {resp, req_connect_time} =
       with_elapsed_ms(fn ->
-        Req.post!("#{state.host}/v1/apps/#{state.app}/machines",
-          connect_options: [timeout: state.boot_timeout],
-          retry: false,
-          auth: {:bearer, state.token},
-          json: %{
-            name: "#{state.app}-flame-#{rand_id(20)}",
-            region: state.region,
-            config: %{
-              image: state.image,
-              guest: %{
-                cpu_kind: state.cpu_kind,
-                cpus: state.cpus,
-                memory_mb: state.memory_mb,
-                gpu_kind: state.gpu_kind
-              },
-              auto_destroy: true,
-              restart: %{policy: "no"},
-              env: state.env,
-              services: state.services,
-              metadata: Map.put(state.metadata, :flame_parent_ip, state.local_ip)
-            }
-          }
+        http_post!("#{state.host}/v1/apps/#{state.app}/machines",
+          content_type: "application/json",
+          headers: [
+            {"Content-Type", "application/json"},
+            {"Authorization", "Bearer #{state.token}"}
+          ],
+          connect_timeout: state.boot_timeout,
+          body:
+            Jason.encode!(%{
+              name: "#{state.app}-flame-#{rand_id(20)}",
+              region: state.region,
+              config: %{
+                image: state.image,
+                guest: %{
+                  cpu_kind: state.cpu_kind,
+                  cpus: state.cpus,
+                  memory_mb: state.memory_mb,
+                  gpu_kind: state.gpu_kind
+                },
+                auto_destroy: true,
+                restart: %{policy: "no"},
+                env: state.env,
+                services: state.services,
+                metadata: Map.put(state.metadata, :flame_parent_ip, state.local_ip)
+              }
+            })
         )
       end)
 
@@ -253,7 +257,7 @@ defmodule FLAME.FlyBackend do
 
     remaining_connect_window = state.boot_timeout - req_connect_time
 
-    case req.body do
+    case resp do
       %{"id" => id, "instance_id" => instance_id, "private_ip" => ip} ->
         new_state =
           %FlyBackend{
@@ -266,7 +270,10 @@ defmodule FLAME.FlyBackend do
         remote_terminator_pid =
           receive do
             {^parent_ref, {:remote_up, remote_terminator_pid}} ->
-              Logger.info("#{inspect(remote_terminator_pid)} up from node #{inspect(node(remote_terminator_pid))}")
+              Logger.info(
+                "#{inspect(remote_terminator_pid)} up from node #{inspect(node(remote_terminator_pid))}"
+              )
+
               remote_terminator_pid
           after
             remaining_connect_window ->
@@ -289,5 +296,38 @@ defmodule FLAME.FlyBackend do
 
   defp rand_id(len) do
     len |> :crypto.strong_rand_bytes() |> Base.encode64(padding: false) |> binary_part(0, len)
+  end
+
+  defp http_post!(url, opts) do
+    Keyword.validate!(opts, [:headers, :body, :connect_timeout, :content_type])
+    headers = Keyword.fetch!(opts, :headers)
+    body = Keyword.fetch!(opts, :body)
+    connect_timeout = Keyword.fetch!(opts, :connect_timeout)
+    content_type = Keyword.fetch!(opts, :content_type)
+
+    http_opts = [
+      ssl: [
+        verify: :verify_peer,
+        cacertfile: String.to_charlist(CAStore.file_path()),
+        depth: 2,
+        customize_hostname_check: [
+          match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+        ]
+      ],
+      connect_timeout: connect_timeout
+    ]
+
+    :httpc.set_options(http_opts)
+
+    case :httpc.request(:post, {url, headers, ~c"#{content_type}", body}, [], []) do
+      {:ok, {{_, 200, _}, _, response_body}} ->
+        Jason.decode!(response_body)
+
+      {:ok, {{_, status, _status_reason}, _, resp_body}} ->
+        raise "failed POST #{url} with #{inspect(status)}: #{inspect(resp_body)}"
+
+      {:error, reason} ->
+        raise "failed POST #{url} with #{inspect(reason)}"
+    end
   end
 end
