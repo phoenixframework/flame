@@ -1,8 +1,6 @@
 defmodule FLAME.Application do
   @moduledoc false
-
   use Application
-  require Logger
 
   @impl true
   def start(_type, _args) do
