@@ -81,4 +81,15 @@ defmodule FLAME.FlyBackendTest do
 
     assert Runner.new(backend: FLAME.FlyBackend)
   end
+
+  test "parent backend attributes" do
+    assert %FLAME.Parent{
+             pid: _,
+             ref: _,
+             backend: FLAME.FlyBackend,
+             flame_vsn: "0.1.12",
+             backend_vsn: "0.1.12",
+             backend_app: :flame
+           } = FLAME.Parent.new(make_ref(), self(), FLAME.FlyBackend)
+  end
 end
