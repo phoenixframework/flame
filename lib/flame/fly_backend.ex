@@ -1,6 +1,6 @@
 defmodule FLAME.FlyBackend do
   @moduledoc """
-  The `FLAME.Backend` using [Fly.io](https://fly.io) machines.
+  A `FLAME.Backend` using [Fly.io](https://fly.io) machines.
 
   The only required configuration is telling FLAME to use the
   `FLAME.FlyBackend` by default and the `:token` which is your Fly.io API
@@ -20,39 +20,41 @@ defmodule FLAME.FlyBackend do
   ```
 
   The following backend options are supported, and mirror the
-  (Fly.io machines create API)[https://fly.io/docs/machines/working-with-machines/]:
+  [Fly.io machines create API](https://fly.io/docs/machines/api/machines-resource/#machine-config-object-properties):
 
-    * `:cpu_kind` - The size of the runner CPU. Defaults to `"performance"`.
+  * `:cpu_kind` - The size of the runner CPU. Defaults to `"performance"`.
 
-    * `:cpus` - The number of runner CPUs. Defaults to  `System.schedulers_online()`
-      for the number of cores of the running parent app.
+  * `:gpu_kind` - The type of GPU reservation to make.
 
-    * `:memory_mb` - The memory of the runner. Must be a 1024 multiple. Defaults to `4096`.
+  * `:cpus` - The number of runner CPUs. Defaults to  `System.schedulers_online()`
+    for the number of cores of the running parent app.
 
-    * `:boot_timeout` - The boot timeout. Defaults to `30_000`.
+  * `:memory_mb` - The memory of the runner. Must be a 1024 multiple. Defaults to `4096`.
 
-    * `:app` – The name of the otp app. Defaults to `System.get_env("FLY_APP_NAME")`,
+  * `:boot_timeout` - The boot timeout. Defaults to `30_000`.
 
-    * `:image` – The URL of the docker image to pass to the machines create endpoint.
-      Defaults to `System.get_env("FLY_IMAGE_REF")` which is the image of your running app.
+  * `:app` – The name of the otp app. Defaults to `System.get_env("FLY_APP_NAME")`,
 
-    * `:token` – The Fly API token. Defaults to `System.get_env("FLY_API_TOKEN")`.
+  * `:image` – The URL of the docker image to pass to the machines create endpoint.
+    Defaults to `System.get_env("FLY_IMAGE_REF")` which is the image of your running app.
 
-    * `:host` – The host of the Fly API. Defaults to `"https://api.machines.dev"`.
+  * `:token` – The Fly API token. Defaults to `System.get_env("FLY_API_TOKEN")`.
 
-    * `:init` – The init object to pass to the machines create endpoint. Defaults to `%{}`.
-      Possible values include:
+  * `:host` – The host of the Fly API. Defaults to `"https://api.machines.dev"`.
 
-        * `:cmd` – list of strings for the command
-        * `:entrypoint` – list strings for the entrypoint command
-        * `:exec` – list of strings for the exec command
-        * `:kernel_args` - list of strings
-        * `:swap_size_mb` – integer value in megabytes for th swap size
-        * `:tty` – boolean
+  * `:init` – The init object to pass to the machines create endpoint. Defaults to `%{}`.
+    Possible values include:
+    
+      * `:cmd` – list of strings for the command
+      * `:entrypoint` – list strings for the entrypoint command
+      * `:exec` – list of strings for the exec command
+      * `:kernel_args` - list of strings
+      * `:swap_size_mb` – integer value in megabytes for th swap size
+      * `:tty` – boolean
 
-    * `:services` - The optional services to run on the machine. Defaults to `[]`.
+  * `:services` - The optional services to run on the machine. Defaults to `[]`.
 
-    * `:metadata` - The optional map of metadata to set for the machine. Defaults to `%{}`.
+  * `:metadata` - The optional map of metadata to set for the machine. Defaults to `%{}`.
 
   ## Environment Variables
 

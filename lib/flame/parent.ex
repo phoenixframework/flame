@@ -13,7 +13,7 @@ defmodule FLAME.Parent do
   When booting a FLAME node, the `FLAME.Backend` is required to
   export the `FLAME_PARENT` environment variable for the provisioned
   instance. This value holds required information about the parent node
-  and can be set using the `FLAME.Parent.encode/3` function.
+  and can be set using the `encode/1` function.
   """
   def get do
     with {:ok, encoded} <- System.fetch_env("FLAME_PARENT"),

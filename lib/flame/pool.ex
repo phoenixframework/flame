@@ -1,18 +1,24 @@
 defmodule FLAME.Pool.RunnerState do
+  @moduledoc false
+
   defstruct count: nil, pid: nil, monitor_ref: nil
 end
 
 defmodule FLAME.Pool.WaitingState do
+  @moduledoc false
+
   defstruct from: nil, monitor_ref: nil, deadline: nil
 end
 
 defmodule FLAME.Pool.Caller do
+  @moduledoc false
+
   defstruct checkout_ref: nil, monitor_ref: nil, runner_ref: nil
 end
 
 defmodule FLAME.Pool do
   @moduledoc """
-  Manages a pool of `FLAME.Runner`'s.
+  Manages a pool of `FLAME.Runner` processes.
 
   Pools support elastic growth and shrinking of the number of runners.
 

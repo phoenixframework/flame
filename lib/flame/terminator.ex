@@ -1,4 +1,6 @@
 defmodule FLAME.Terminator.Caller do
+  @moduledoc false
+
   defstruct from_pid: nil, timer: nil, placed_child_ref: nil, placed_caller_ref: nil, link?: false
 end
 
