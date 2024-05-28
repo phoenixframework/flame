@@ -310,7 +310,11 @@ defmodule FLAME.FlyBackend do
   end
 
   defp rand_id(len) do
-    len |> :crypto.strong_rand_bytes() |> Base.encode64(padding: false) |> binary_part(0, len)
+    len
+    |> :crypto.strong_rand_bytes()
+    |> Base.encode64(padding: false)
+    |> binary_part(0, len)
+    |> String.replace(~r/[^a-zA-Z0-9]/, "")
   end
 
   defp http_post!(url, opts) do
@@ -325,13 +329,14 @@ defmodule FLAME.FlyBackend do
     content_type = Keyword.fetch!(opts, :content_type)
 
     http_opts = [
-      ssl: [
-        verify: :verify_peer,
-        depth: 2,
-        customize_hostname_check: [
-          match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
-        ]
-      ] ++ cacerts_options(),
+      ssl:
+        [
+          verify: :verify_peer,
+          depth: 2,
+          customize_hostname_check: [
+            match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+          ]
+        ] ++ cacerts_options(),
       connect_timeout: connect_timeout
     ]
 
