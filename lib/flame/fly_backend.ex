@@ -327,7 +327,7 @@ defmodule FLAME.FlyBackend do
         raise "failed POST #{url} with #{inspect(status)} (#{inspect(reason)}): #{inspect(resp_body)} #{inspect(headers)}"
 
       {:error, reason} ->
-        raise "failed POST #{url} with #{inspect(reason)}"
+        raise "failed POST #{url} with #{inspect(reason)} #{inspect(headers)}"
     end
   end
 end
