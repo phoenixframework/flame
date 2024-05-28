@@ -40,6 +40,16 @@ defmodule FLAME.FlyBackend do
 
     * `:host` – The host of the Fly API. Defaults to `"https://api.machines.dev"`.
 
+    * `:init` – The init object to pass to the machines create endpoint. Defaults to `%{}`.
+      Possible values include:
+
+        * `:cmd` – array string[]
+        * `:entrypoint` – array string[]
+        * `:exec` – array string[]
+        * `:kernel_args` - array string[]
+        * `:swap_size_mb` – integer
+        * `:tty` – boolean
+
     * `:services` - The optional services to run on the machine. Defaults to `[]`.
 
     * `:metadata` - The optional map of metadata to set for the machine. Defaults to `%{}`.
@@ -78,6 +88,7 @@ defmodule FLAME.FlyBackend do
   @derive {Inspect,
            only: [
              :host,
+             :init,
              :cpu_kind,
              :cpus,
              :gpu_kind,
@@ -94,6 +105,7 @@ defmodule FLAME.FlyBackend do
              :boot_timeout
            ]}
   defstruct host: nil,
+            init: %{},
             local_ip: nil,
             env: %{},
             region: nil,
@@ -122,6 +134,7 @@ defmodule FLAME.FlyBackend do
     :image,
     :token,
     :host,
+    :init,
     :cpu_kind,
     :cpus,
     :memory_mb,
@@ -152,6 +165,7 @@ defmodule FLAME.FlyBackend do
       runner_node_basename: node_base,
       services: [],
       metadata: %{},
+      init: %{},
       log: Keyword.get(conf, :log, false)
     }
 
@@ -232,6 +246,7 @@ defmodule FLAME.FlyBackend do
               region: state.region,
               config: %{
                 image: state.image,
+                init: state.init,
                 guest: %{
                   cpu_kind: state.cpu_kind,
                   cpus: state.cpus,
