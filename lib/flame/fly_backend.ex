@@ -222,8 +222,8 @@ defmodule FLAME.FlyBackend do
         http_post!("#{state.host}/v1/apps/#{state.app}/machines",
           content_type: "application/json",
           headers: [
-            {"Content-Type", "application/json"},
-            {"Authorization", "Bearer #{state.token}"}
+            {~c"Content-Type", "application/json"},
+            {~c"Authorization", "Bearer #{state.token}"}
           ],
           connect_timeout: state.boot_timeout,
           body:
