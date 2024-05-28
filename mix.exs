@@ -46,7 +46,7 @@ defmodule FLAME.Runner.MixProject do
   def application do
     [
       mod: {FLAME.Application, []},
-      extra_applications: [:logger]
+      extra_applications: [:logger, inets: :optional, ssl: :optional]
     ]
   end
 
@@ -55,7 +55,8 @@ defmodule FLAME.Runner.MixProject do
 
   defp deps do
     [
-      {:req, "~> 0.4.13"},
+      {:jason, ">= 0.0.0"},
+      {:castore, ">= 0.0.0"},
       {:mox, "~> 1.1.0", only: :test},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]

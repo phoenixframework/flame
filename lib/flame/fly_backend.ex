@@ -42,6 +42,16 @@ defmodule FLAME.FlyBackend do
 
   * `:host` – The host of the Fly API. Defaults to `"https://api.machines.dev"`.
 
+  * `:init` – The init object to pass to the machines create endpoint. Defaults to `%{}`.
+    Possible values include:
+    
+      * `:cmd` – list of strings for the command
+      * `:entrypoint` – list strings for the entrypoint command
+      * `:exec` – list of strings for the exec command
+      * `:kernel_args` - list of strings
+      * `:swap_size_mb` – integer value in megabytes for th swap size
+      * `:tty` – boolean
+
   * `:services` - The optional services to run on the machine. Defaults to `[]`.
 
   * `:metadata` - The optional map of metadata to set for the machine. Defaults to `%{}`.
@@ -80,6 +90,7 @@ defmodule FLAME.FlyBackend do
   @derive {Inspect,
            only: [
              :host,
+             :init,
              :cpu_kind,
              :cpus,
              :gpu_kind,
@@ -96,6 +107,7 @@ defmodule FLAME.FlyBackend do
              :boot_timeout
            ]}
   defstruct host: nil,
+            init: %{},
             local_ip: nil,
             env: %{},
             region: nil,
@@ -124,6 +136,7 @@ defmodule FLAME.FlyBackend do
     :image,
     :token,
     :host,
+    :init,
     :cpu_kind,
     :cpus,
     :memory_mb,
@@ -154,6 +167,7 @@ defmodule FLAME.FlyBackend do
       runner_node_basename: node_base,
       services: [],
       metadata: %{},
+      init: %{},
       log: Keyword.get(conf, :log, false)
     }
 
@@ -219,30 +233,35 @@ defmodule FLAME.FlyBackend do
 
   @impl true
   def remote_boot(%FlyBackend{parent_ref: parent_ref} = state) do
-    {req, req_connect_time} =
+    {resp, req_connect_time} =
       with_elapsed_ms(fn ->
-        Req.post!("#{state.host}/v1/apps/#{state.app}/machines",
-          connect_options: [timeout: state.boot_timeout],
-          retry: false,
-          auth: {:bearer, state.token},
-          json: %{
-            name: "#{state.app}-flame-#{rand_id(20)}",
-            region: state.region,
-            config: %{
-              image: state.image,
-              guest: %{
-                cpu_kind: state.cpu_kind,
-                cpus: state.cpus,
-                memory_mb: state.memory_mb,
-                gpu_kind: state.gpu_kind
-              },
-              auto_destroy: true,
-              restart: %{policy: "no"},
-              env: state.env,
-              services: state.services,
-              metadata: Map.put(state.metadata, :flame_parent_ip, state.local_ip)
-            }
-          }
+        http_post!("#{state.host}/v1/apps/#{state.app}/machines",
+          content_type: "application/json",
+          headers: [
+            {"Content-Type", "application/json"},
+            {"Authorization", "Bearer #{state.token}"}
+          ],
+          connect_timeout: state.boot_timeout,
+          body:
+            Jason.encode!(%{
+              name: "#{state.app}-flame-#{rand_id(20)}",
+              region: state.region,
+              config: %{
+                image: state.image,
+                init: state.init,
+                guest: %{
+                  cpu_kind: state.cpu_kind,
+                  cpus: state.cpus,
+                  memory_mb: state.memory_mb,
+                  gpu_kind: state.gpu_kind
+                },
+                auto_destroy: true,
+                restart: %{policy: "no"},
+                env: state.env,
+                services: state.services,
+                metadata: Map.put(state.metadata, :flame_parent_ip, state.local_ip)
+              }
+            })
         )
       end)
 
@@ -255,15 +274,14 @@ defmodule FLAME.FlyBackend do
 
     remaining_connect_window = state.boot_timeout - req_connect_time
 
-    case req.body do
+    case resp do
       %{"id" => id, "instance_id" => instance_id, "private_ip" => ip} ->
         new_state =
           %FlyBackend{
             state
             | runner_id: id,
               runner_instance_id: instance_id,
-              runner_private_ip: ip,
-              runner_node_name: :"#{state.runner_node_basename}@#{ip}"
+              runner_private_ip: ip
           }
 
         remote_terminator_pid =
@@ -276,7 +294,12 @@ defmodule FLAME.FlyBackend do
               exit(:timeout)
           end
 
-        new_state = %FlyBackend{new_state | remote_terminator_pid: remote_terminator_pid}
+        new_state = %FlyBackend{
+          new_state
+          | remote_terminator_pid: remote_terminator_pid,
+            runner_node_name: node(remote_terminator_pid)
+        }
+
         {:ok, remote_terminator_pid, new_state}
 
       other ->
@@ -286,5 +309,40 @@ defmodule FLAME.FlyBackend do
 
   defp rand_id(len) do
     len |> :crypto.strong_rand_bytes() |> Base.encode64(padding: false) |> binary_part(0, len)
+  end
+
+  defp http_post!(url, opts) do
+    Keyword.validate!(opts, [:headers, :body, :connect_timeout, :content_type])
+
+    headers =
+      for {field, val} <- Keyword.fetch!(opts, :headers),
+          do: {String.to_charlist(field), val}
+
+    body = Keyword.fetch!(opts, :body)
+    connect_timeout = Keyword.fetch!(opts, :connect_timeout)
+    content_type = Keyword.fetch!(opts, :content_type)
+
+    http_opts = [
+      ssl: [
+        verify: :verify_peer,
+        cacertfile: String.to_charlist(CAStore.file_path()),
+        depth: 2,
+        customize_hostname_check: [
+          match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+        ]
+      ],
+      connect_timeout: connect_timeout
+    ]
+
+    case :httpc.request(:post, {url, headers, ~c"#{content_type}", body}, http_opts, []) do
+      {:ok, {{_, 200, _}, _, response_body}} ->
+        Jason.decode!(response_body)
+
+      {:ok, {{_, status, reason}, _, resp_body}} ->
+        raise "failed POST #{url} with #{inspect(status)} (#{inspect(reason)}): #{inspect(resp_body)} #{inspect(headers)}"
+
+      {:error, reason} ->
+        raise "failed POST #{url} with #{inspect(reason)} #{inspect(headers)}"
+    end
   end
 end
