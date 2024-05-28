@@ -18,7 +18,13 @@ defmodule FLAME.Parent do
 
   @flame_vsn Keyword.fetch!(Mix.Project.config(), :version)
 
-  defstruct pid: nil, ref: nil, backend: nil, flame_vsn: nil, backend_vsn: nil, backend_app: nil
+  defstruct pid: nil,
+            ref: nil,
+            backend: nil,
+            flame_vsn: nil,
+            backend_vsn: nil,
+            backend_app: nil,
+            host_env: nil
 
   @doc """
   Gets the `%FLAME.Parent{}` struct from the system environment.
@@ -32,9 +38,9 @@ defmodule FLAME.Parent do
   """
   def get do
     with {:ok, encoded} <- System.fetch_env("FLAME_PARENT"),
-         %{ref: ref, pid: pid, backend: backend} <-
+         %{ref: ref, pid: pid, backend: backend, host_env: host_env} <-
            encoded |> Base.decode64!() |> :erlang.binary_to_term() do
-      new(ref, pid, backend)
+      new(ref, pid, backend, host_env)
     else
       _ -> nil
     end
@@ -46,10 +52,11 @@ defmodule FLAME.Parent do
   The `pid` is the parent node's `FLAME.Runner` process started by
   the `FLAME.Pool`.
   """
-  def new(ref, pid, backend) when is_reference(ref) and is_pid(pid) and is_atom(backend) do
+  def new(ref, pid, backend, host_env)
+      when is_reference(ref) and is_pid(pid) and is_atom(backend) do
     {backend_app, backend_vsn} =
       case :application.get_application(backend) do
-        {:ok, app} -> {app, to_string(Application.spec(app)[:vsn])}
+        {:ok, app} -> {app, to_string(Application.spec(app, :vsn))}
         :undefined -> {nil, nil}
       end
 
@@ -57,6 +64,7 @@ defmodule FLAME.Parent do
       pid: pid,
       ref: ref,
       backend: backend,
+      host_env: host_env,
       flame_vsn: @flame_vsn,
       backend_app: backend_app,
       backend_vsn: backend_vsn
@@ -70,7 +78,7 @@ defmodule FLAME.Parent do
     info =
       parent
       |> Map.from_struct()
-      |> Map.take([:ref, :pid, :backend, :flame_vsn, :backend_app, :backend_vsn])
+      |> Map.take([:ref, :pid, :backend, :flame_vsn, :backend_app, :backend_vsn, :host_env])
 
     info |> :erlang.term_to_binary() |> Base.encode64()
   end

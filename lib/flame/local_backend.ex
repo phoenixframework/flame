@@ -40,7 +40,7 @@ defmodule FLAME.LocalBackend do
 
   @impl true
   def remote_boot(state) do
-    parent = FLAME.Parent.new(make_ref(), self(), __MODULE__)
+    parent = FLAME.Parent.new(make_ref(), self(), __MODULE__, nil)
     name = Module.concat(state.terminator_sup, to_string(System.unique_integer([:positive])))
     opts = [name: name, parent: parent, log: state.log]
 

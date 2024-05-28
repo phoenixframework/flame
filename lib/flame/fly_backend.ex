@@ -44,7 +44,7 @@ defmodule FLAME.FlyBackend do
 
   * `:init` – The init object to pass to the machines create endpoint. Defaults to `%{}`.
     Possible values include:
-    
+
       * `:cmd` – list of strings for the command
       * `:entrypoint` – list strings for the entrypoint command
       * `:exec` – list of strings for the exec command
@@ -188,7 +188,7 @@ defmodule FLAME.FlyBackend do
 
     encoded_parent =
       parent_ref
-      |> FLAME.Parent.new(self(), __MODULE__)
+      |> FLAME.Parent.new(self(), __MODULE__, "FLY_PRIVATE_IP")
       |> FLAME.Parent.encode()
 
     new_env =
@@ -235,6 +235,8 @@ defmodule FLAME.FlyBackend do
   def remote_boot(%FlyBackend{parent_ref: parent_ref} = state) do
     {resp, req_connect_time} =
       with_elapsed_ms(fn ->
+        flame_node_base = "#{state.app}-flame-#{rand_id(20)}"
+
         http_post!("#{state.host}/v1/apps/#{state.app}/machines",
           content_type: "application/json",
           headers: [
@@ -244,7 +246,7 @@ defmodule FLAME.FlyBackend do
           connect_timeout: state.boot_timeout,
           body:
             Jason.encode!(%{
-              name: "#{state.app}-flame-#{rand_id(20)}",
+              name: flame_node_base,
               region: state.region,
               config: %{
                 image: state.image,
@@ -257,7 +259,7 @@ defmodule FLAME.FlyBackend do
                 },
                 auto_destroy: true,
                 restart: %{policy: "no"},
-                env: state.env,
+                env: Map.merge(state.env, %{"FLAME_NODE_BASE" => flame_node_base}),
                 services: state.services,
                 metadata: Map.put(state.metadata, :flame_parent_ip, state.local_ip)
               }

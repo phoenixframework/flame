@@ -90,6 +90,6 @@ defmodule FLAME.FlyBackendTest do
              flame_vsn: "0.1.12",
              backend_vsn: "0.1.12",
              backend_app: :flame
-           } = FLAME.Parent.new(make_ref(), self(), FLAME.FlyBackend)
+           } = FLAME.Parent.new(make_ref(), self(), FLAME.FlyBackend, "FLY_PRIVATE_IP")
   end
 end
