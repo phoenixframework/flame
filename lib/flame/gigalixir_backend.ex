@@ -12,7 +12,7 @@ defmodule FLAME.GigalixirBackend do
       
     * `:boot_timeout` - The boot timeout. Defaults to `60_000` (60 seconds).
 
-    * `:max_runtime` - The maximum runtime of the runner in seconds. Defaults to `300` (5 minutes).
+    * `:max_runtime` - The maximum runtime of the runner in seconds.
 
     * `:app` – The name of the Gigalixir app. Defaults to `System.get_env("GIGALIXIR__APP_NAME")`,
 
@@ -79,7 +79,6 @@ defmodule FLAME.GigalixirBackend do
       token: System.get_env("GIGALIXIR__APP_KEY"),
       host: "https://api.gigalixir.com",
       boot_timeout: 60_000,
-      max_runtime: 300,
       runner_node_basename: node_base,
       log: Keyword.get(conf, :log, false)
     }
