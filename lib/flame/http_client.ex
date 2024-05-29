@@ -23,10 +23,10 @@ defmodule FLAME.HttpClient do
     ]
 
     case :httpc.request(:post, {url, headers, ~c"#{content_type}", body}, http_opts, []) do
-      {:ok, {{_, 201, _}, _, response_body}} ->
+      {:ok, {{_, 200, _}, _, response_body}} ->
         Jason.decode!(response_body)
 
-      {:ok, {{_, 200, _}, _, response_body}} ->
+      {:ok, {{_, 201, _}, _, response_body}} ->
         Jason.decode!(response_body)
 
       {:ok, {{_, status, reason}, _, resp_body}} ->
