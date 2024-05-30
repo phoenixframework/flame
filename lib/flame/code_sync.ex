@@ -61,6 +61,7 @@ defmodule FLAME.CodeSync do
           mod != basename,
           do: Module.concat([mod])
 
+    dbg()
     %CodeSync{
       current
       | changed_paths: changed,
