@@ -255,20 +255,20 @@ defmodule FLAME.Runner do
   def handle_call(:checkout, {from_pid, _tag}, state) do
     ref = Process.monitor(from_pid)
 
-    state =
-      case maybe_diff_code_paths(state) do
-        {new_state, nil} ->
-          new_state
+    # state =
+    #   case maybe_diff_code_paths(state) do
+    #     {new_state, nil} ->
+    #       new_state
 
-        {new_state, %CodeSync.PackagedStream{} = parent_pkg} ->
-          remote_call!(state.runner, state.backend_state, state.runner.boot_timeout, fn ->
-            :ok = CodeSync.extract_packaged_stream(parent_pkg)
-          end)
+    #     {new_state, %CodeSync.PackagedStream{} = parent_pkg} ->
+    #       remote_call!(state.runner, state.backend_state, state.runner.boot_timeout, fn ->
+    #         :ok = CodeSync.extract_packaged_stream(parent_pkg)
+    #       end)
 
-          CodeSync.rm_packaged_stream!(parent_pkg)
+    #       CodeSync.rm_packaged_stream!(parent_pkg)
 
-          new_state
-      end
+    #       new_state
+    #   end
 
     {:reply, {ref, state.runner, state.backend_state}, put_checkout(state, from_pid, ref)}
   end
