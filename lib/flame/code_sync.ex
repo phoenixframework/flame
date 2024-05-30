@@ -94,7 +94,8 @@ defmodule FLAME.CodeSync do
     flame_stream = File.stream!(target_tmp_path)
     # transfer the file
     Enum.into(pkg.stream, flame_stream)
-    :ok = :erl_tar.extract(target_tmp_path, [{:cwd, pkg.extract_dir.()}, :compressed, :verbose])
+    :ok = :erl_tar.extract(target_tmp_path, [{:cwd, pkg.extract_dir.()}, :compressed])
+    IO.inspect :erl_tar.table(target_tmp_path, [:compressed, :verbose])
     File.rm!(target_tmp_path)
     # purge any deleted modules
     for mod <- pkg.purge_modules, do: :code.purge(mod)
