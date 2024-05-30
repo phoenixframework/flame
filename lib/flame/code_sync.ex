@@ -90,13 +90,18 @@ defmodule FLAME.CodeSync do
   defp trim_leading_slash([_ | _] = path), do: path
 
   def extract_packaged_stream(%PackagedStream{} = pkg) do
+    extract_dir = pkg.extract_dir.()
     target_tmp_path = Path.join([pkg.tmp_dir.(), "flame_child_code_sync_#{pkg.id}.tar.gz"])
     flame_stream = File.stream!(target_tmp_path)
     # transfer the file
     Enum.into(pkg.stream, flame_stream)
-    :ok = :erl_tar.extract(target_tmp_path, [{:cwd, pkg.extract_dir.()}, :compressed])
-    {:ok, tab} = :erl_tar.table(target_tmp_path, [:compressed])
-    IO.inspect({:tab, tab})
+
+    # extract tar
+    :ok = :erl_tar.extract(target_tmp_path, [{:cwd, extract_dir}, :compressed, :verbose])
+
+    # add code paths
+    :ok = add_code_paths_from_tar(target_tmp_path, extract_dir)
+
     File.rm!(target_tmp_path)
     # purge any deleted modules
     for mod <- pkg.purge_modules, do: :code.purge(mod)
@@ -131,11 +136,20 @@ defmodule FLAME.CodeSync do
 
     get_paths.()
     |> Kernel.--(reject_apps)
-    |> Enum.reject(&(List.starts_with?(&1, otp_lib)))
+    |> Enum.reject(&List.starts_with?(&1, otp_lib))
     |> Enum.flat_map(&Path.wildcard(Path.join(&1, "**/*{.app,.beam}")))
   end
 
   defp generate_hashes(beams) when is_list(beams) do
     Enum.into(beams, %{}, fn path -> {path, :crypto.hash(:md5, File.read!(path))} end)
+  end
+
+  defp add_code_paths_from_tar(tar_path, extract_dir) do
+    {:ok, tab} = :erl_tar.table(tar_path, [:compressed])
+
+    tab
+    |> Enum.map(fn rel_path -> extract_dir |> Path.join(to_string(rel_path)) |> Path.dirname() end)
+    |> Enum.uniq()
+    |> Enum.each(fn code_path -> :code.add_path(String.to_charlist(code_path)) end)
   end
 end

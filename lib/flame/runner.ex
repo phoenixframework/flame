@@ -156,7 +156,6 @@ defmodule FLAME.Runner do
 
   @impl true
   def init(opts) do
-    IO.inspect({:starting, opts})
     runner = new(opts)
 
     case runner.backend_init do
@@ -255,20 +254,20 @@ defmodule FLAME.Runner do
   def handle_call(:checkout, {from_pid, _tag}, state) do
     ref = Process.monitor(from_pid)
 
-    # state =
-    #   case maybe_diff_code_paths(state) do
-    #     {new_state, nil} ->
-    #       new_state
+    state =
+      case maybe_diff_code_paths(state) do
+        {new_state, nil} ->
+          new_state
 
-    #     {new_state, %CodeSync.PackagedStream{} = parent_pkg} ->
-    #       remote_call!(state.runner, state.backend_state, state.runner.boot_timeout, fn ->
-    #         :ok = CodeSync.extract_packaged_stream(parent_pkg)
-    #       end)
+        {new_state, %CodeSync.PackagedStream{} = parent_pkg} ->
+          remote_call!(state.runner, state.backend_state, state.runner.boot_timeout, fn ->
+            :ok = CodeSync.extract_packaged_stream(parent_pkg)
+          end)
 
-    #       CodeSync.rm_packaged_stream!(parent_pkg)
+          CodeSync.rm_packaged_stream!(parent_pkg)
 
-    #       new_state
-    #   end
+          new_state
+      end
 
     {:reply, {ref, state.runner, state.backend_state}, put_checkout(state, from_pid, ref)}
   end
@@ -473,7 +472,6 @@ defmodule FLAME.Runner do
     if copy_opts = runner.copy_code_paths do
       code_sync = CodeSync.new(copy_opts)
       %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(code_sync)
-      IO.inspect({:copy, parent_stream})
       new_runner = %Runner{runner | code_sync: code_sync}
       {%{state | runner: new_runner}, parent_stream}
     else
