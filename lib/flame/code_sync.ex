@@ -105,9 +105,10 @@ defmodule FLAME.CodeSync do
 
     File.rm!(target_tmp_path)
     # purge any deleted modules
-    for mod <- pkg.purge_modules, do: :code.purge(mod)
+    for mod <- pkg.purge_modules, do: :code.purge(IO.inspect(mod, label: "purge"))
     # delete any deleted code paths, and prune empty dirs
     for del_path <- pkg.deleted_paths do
+      IO.inspect(del_path, label: "delete_path")
       File.rm!(del_path)
       ebin_dir = Path.dirname(del_path)
 
