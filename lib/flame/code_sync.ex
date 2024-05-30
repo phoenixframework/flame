@@ -129,7 +129,7 @@ defmodule FLAME.CodeSync do
 
     get_paths.()
     |> Kernel.--(reject_apps)
-    |> Enum.reject(&(List.starts_with?(&1, otp_lib) or Enum.take(&1, -13) == ~c"/consolidated"))
+    |> Enum.reject(&(List.starts_with?(&1, otp_lib)))
     |> Enum.flat_map(&Path.wildcard(Path.join(&1, "**/*{.app,.beam}")))
   end
 
