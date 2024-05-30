@@ -156,6 +156,7 @@ defmodule FLAME.Runner do
 
   @impl true
   def init(opts) do
+    IO.inspect({:starting, opts})
     runner = new(opts)
 
     case runner.backend_init do
