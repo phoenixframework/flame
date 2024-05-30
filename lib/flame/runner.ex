@@ -473,6 +473,7 @@ defmodule FLAME.Runner do
     if copy_opts = runner.copy_code_paths do
       code_sync = CodeSync.new(copy_opts)
       %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(code_sync)
+      IO.inspect({:copy, parent_stream})
       new_runner = %Runner{runner | code_sync: code_sync}
       {%{state | runner: new_runner}, parent_stream}
     else
