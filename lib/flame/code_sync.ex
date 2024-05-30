@@ -1,29 +1,41 @@
+defmodule FLAME.CodeSync.PackagedStream do
+  defstruct stream: nil, id: nil, extract_dir: nil, tmp_dir: nil
+end
+
 defmodule FLAME.CodeSync do
   @moduledoc false
   alias FLAME.CodeSync
+  alias FLAME.CodeSync.PackagedStream
 
   defstruct beams: [],
             hashes: %{},
+            get_paths: nil,
+            extract_dir: nil,
+            tmp_dir: nil,
             changed_paths: [],
             deleted_paths: [],
             purge_modules: [],
-            adapter: nil
+            id: nil,
+            opts: []
 
-  def new(
-        adapter \\ %{
-          beams: &beams/0,
-          generate_hashes: &generate_hashes/1,
-          tar_open: &:erl_tar.open/2,
-          tar_add: &:erl_tar.add/3,
-          tar_close: &:erl_tar.close/1
-        }
-      ) do
-    beam_files = adapter.beams.()
-    %CodeSync{adapter: adapter, beams: beam_files, hashes: adapter.generate_hashes.(beam_files)}
+  def new(opts \\ []) do
+    Keyword.validate!(opts, [:id, :tmp_dir, :extract_dir, :get_paths])
+    get_paths = Keyword.get(opts, :get_paths, &:code.get_path/0)
+    beam_files = beams(get_paths)
+    id = opts[:id] || System.unique_integer([:positive])
+
+    %CodeSync{
+      id: id,
+      opts: Keyword.put(opts, :id, id),
+      tmp_dir: Keyword.get(opts, :tmp_dir, &System.tmp_dir!/0),
+      extract_dir: Keyword.get(opts, :extract_dir, fn -> "/" end),
+      beams: beam_files,
+      hashes: generate_hashes(beam_files)
+    }
   end
 
   def diff(%CodeSync{hashes: prev_hashes} = prev) do
-    current = new(prev.adapter)
+    current = new(prev.opts)
 
     changed =
       for path <- current.beams,
@@ -48,36 +60,36 @@ defmodule FLAME.CodeSync do
     }
   end
 
-  def package_to_stream(%CodeSync{beams: beams, adapter: adapter}, out_path \\ nil) do
-    out_path = out_path || uniq_tmp_file("flame_code_sync", "tar.gz")
+  def package_to_stream(%CodeSync{beams: beams} = code) do
+    out_path = Path.join([code.tmp_dir.(), "flame_parent_code_sync_#{code.id}.tar.gz"])
     dirs = for beam <- beams, uniq: true, do: ~c"#{Path.dirname(beam)}"
-    {:ok, tar} = adapter.tar_open.(out_path, [:write, :compressed])
-    for dir <- dirs, do: adapter.tar_add.(tar, dir, recursive: true)
-    :ok = adapter.tar_close.(tar)
+    {:ok, tar} = :erl_tar.open(out_path, [:write, :compressed])
+    for dir <- dirs, do: :erl_tar.add(tar, dir, trim_leading_slash(dir), [:verbose])
+    :ok = :erl_tar.close(tar)
 
-    File.stream!(out_path, [], 2048)
+    %PackagedStream{
+      id: code.id,
+      tmp_dir: code.tmp_dir,
+      extract_dir: code.extract_dir,
+      stream: File.stream!(out_path, [], 2048)
+    }
   end
 
-  def uniq_tmp_file(base_name, ext) do
-    Path.join([System.tmp_dir!(), "#{base_name}-#{System.unique_integer([:positive])}.#{ext}"])
-  end
+  defp trim_leading_slash([?/ | path]), do: path
+  defp trim_leading_slash([_ | _] = path), do: path
 
-  def extract_packaged_stream(
-        parent_stream,
-        target_path \\ nil,
-        tar_extract \\ &:erl_tar.extract/2
-      ) do
-    target_path = target_path || uniq_tmp_file("flame_code_sync", "tar.gz")
-    flame_stream = File.stream!(target_path)
+  def extract_packaged_stream(%PackagedStream{} = pkg) do
+    target_tmp_path = Path.join([pkg.tmp_dir.(), "flame_child_code_sync_#{pkg.id}.tar.gz"])
+    flame_stream = File.stream!(target_tmp_path)
     # transfer the file
-    Enum.into(parent_stream, flame_stream)
-    :ok = tar_extract.(target_path, [{:cwd, "/"}, :compressed])
-    File.rm!(target_path)
+    Enum.into(pkg.stream, flame_stream)
+    :ok = :erl_tar.extract(target_tmp_path, [{:cwd, pkg.extract_dir.()}, :compressed, :verbose])
+    File.rm!(target_tmp_path)
     :c.lm()
     :ok
   end
 
-  defp beams do
+  defp beams(get_paths) do
     otp_lib = :code.lib_dir()
 
     reject_apps =
@@ -86,7 +98,7 @@ defmodule FLAME.CodeSync do
           is_list(ebin),
           do: ebin
 
-    :code.get_path()
+    get_paths.()
     |> Kernel.--(reject_apps)
     |> Enum.reject(&(List.starts_with?(&1, otp_lib) or Enum.take(&1, -13) == ~c"/consolidated"))
     |> Enum.flat_map(&Path.wildcard(Path.join(&1, "**/*{.app,.beam}")))
