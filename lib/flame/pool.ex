@@ -64,7 +64,8 @@ defmodule FLAME.Pool do
             on_grow_start: nil,
             on_grow_end: nil,
             on_shrink: nil,
-            async_boot_timer: nil
+            async_boot_timer: nil,
+            copy_code_paths: false
 
   def child_spec(opts) do
     %{
@@ -134,6 +135,10 @@ defmodule FLAME.Pool do
 
         * `:name` - The name of the pool
         * `:count` - The number of runners the pool is attempting to shrink to
+
+    * `:copy_code_paths` – If `true`, the pool will copy the code paths from the parent node
+      to the runner node on boot. Useful when you are starting an image that needs to run
+      dynamic code that is not available on the runner node. Defaults to `false`.
   """
   def start_link(opts) do
     Keyword.validate!(opts, [
@@ -155,7 +160,8 @@ defmodule FLAME.Pool do
       :shutdown_timeout,
       :on_grow_start,
       :on_grow_end,
-      :on_shrink
+      :on_shrink,
+      :copy_code_paths
     ])
 
     GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
@@ -355,7 +361,8 @@ defmodule FLAME.Pool do
           :timeout,
           :boot_timeout,
           :shutdown_timeout,
-          :idle_shutdown_after
+          :idle_shutdown_after,
+          :copy_code_paths
         ]
       )
 

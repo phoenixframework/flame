@@ -160,7 +160,7 @@ defmodule FLAME.RunnerTest do
     end
 
     test "multi use" do
-      {:ok, runner} = mock_successful_runner(4)
+      {:ok, runner} = mock_successful_runner(4, copy_code_paths: true)
       Process.monitor(runner)
       assert Runner.remote_boot(runner) == :ok
 
@@ -250,5 +250,15 @@ defmodule FLAME.RunnerTest do
       assert_receive :stopped, timeout * 2
       assert_receive {:DOWN, _ref, :process, ^runner, _}
     end
+  end
+
+  test "copy_code_paths" do
+    adapter = FLAME.CodeSyncMock.mock_adapter()
+    {:ok, runner} = mock_successful_runner(3, copy_code_paths: adapter)
+
+    Process.monitor(runner)
+    assert Runner.remote_boot(runner) == :ok
+    assert Runner.call(runner, self(), fn -> :works end, timeout: 1234) == :works
+    assert Runner.shutdown(runner) == :ok
   end
 end

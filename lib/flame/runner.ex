@@ -22,7 +22,7 @@ defmodule FLAME.Runner do
   use GenServer
   require Logger
 
-  alias FLAME.{Runner, Terminator}
+  alias FLAME.{Runner, Terminator, CodeSync}
 
   @derive {Inspect,
            only: [
@@ -55,7 +55,9 @@ defmodule FLAME.Runner do
             boot_timeout: 10_000,
             shutdown_timeout: 5_000,
             idle_shutdown_after: nil,
-            idle_shutdown_check: nil
+            idle_shutdown_check: nil,
+            copy_code_paths: false,
+            code_sync: nil
 
   @doc """
   Starts a runner.
@@ -69,6 +71,7 @@ defmodule FLAME.Runner do
     `:boot_timeout` - The boot timeout of the runner
     `:shutdown_timeout` - The shutdown timeout
     `:idle_shutdown_after` - The idle shutdown time
+    `:copy_code_paths` - TODO
   """
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts)
@@ -271,6 +274,7 @@ defmodule FLAME.Runner do
             {:ok, remote_terminator_pid, new_backend_state} when is_pid(remote_terminator_pid) ->
               Process.monitor(remote_terminator_pid)
               new_runner = %Runner{runner | terminator: remote_terminator_pid, status: :booted}
+              {new_runner, parent_stream} = maybe_stream_code_paths(new_runner)
               new_state = %{state | runner: new_runner, backend_state: new_backend_state}
 
               %Runner{
@@ -287,7 +291,15 @@ defmodule FLAME.Runner do
 
                   :ok =
                     Terminator.schedule_idle_shutdown(term, idle_after, idle_check, single_use)
+
+                  if parent_stream do
+                    :ok = CodeSync.extract_packaged_stream(parent_stream)
+                  else
+                    :ok
+                  end
                 end)
+
+              if parent_stream, do: File.rm!(parent_stream.path)
 
               {:reply, :ok, new_state}
 
@@ -302,6 +314,17 @@ defmodule FLAME.Runner do
     end
   end
 
+  defp maybe_stream_code_paths(%Runner{} = runner) do
+    if adapter = runner.copy_code_paths do
+      code_sync = if is_map(adapter), do: CodeSync.new(adapter), else: CodeSync.new()
+      if is_map(adapter), do: IO.inspect(adapter, label: "CodeSync adapter")
+      parent_stream = CodeSync.package_to_stream(code_sync)
+      {%Runner{runner | code_sync: code_sync}, parent_stream}
+    else
+      {runner, nil}
+    end
+  end
+
   @doc false
   def new(opts) when is_list(opts) do
     opts =
@@ -312,7 +335,8 @@ defmodule FLAME.Runner do
         :timeout,
         :boot_timeout,
         :shutdown_timeout,
-        :idle_shutdown_after
+        :idle_shutdown_after,
+        :copy_code_paths
       ])
 
     {idle_shutdown_after_ms, idle_check} =
@@ -335,7 +359,8 @@ defmodule FLAME.Runner do
         shutdown_timeout: opts[:shutdown_timeout] || 30_000,
         idle_shutdown_after: idle_shutdown_after_ms,
         idle_shutdown_check: idle_check,
-        terminator: nil
+        terminator: nil,
+        copy_code_paths: Keyword.get(opts, :copy_code_paths, false)
       }
 
     {backend, backend_init} =
