@@ -21,8 +21,8 @@ defmodule FLAME.CodeSyncTest do
              } = code_sync
 
       assert rel(mock, beams) == [
-               "one/ebin/Elixir.FLAME.Test.Mod1.beam",
-               "two/ebin/Elixir.FLAME.Test.Mod2.beam"
+               "one/ebin/Elixir.FLAME.Test.CodeSyncMock.Mod1.beam",
+               "two/ebin/Elixir.FLAME.Test.CodeSyncMock.Mod2.beam"
              ]
     end
   end
@@ -36,12 +36,15 @@ defmodule FLAME.CodeSyncTest do
     current = CodeSync.diff(previous)
 
     assert rel(mock, current.changed_paths) == [
-             "one/ebin/Elixir.FLAME.Test.Mod1.beam",
-             "one/ebin/Elixir.FLAME.Test.Mod3.beam"
+             "one/ebin/Elixir.FLAME.Test.CodeSyncMock.Mod1.beam",
+             "one/ebin/Elixir.FLAME.Test.CodeSyncMock.Mod3.beam"
            ]
 
-    assert rel(mock, current.deleted_paths) == ["two/ebin/Elixir.FLAME.Test.Mod2.beam"]
-    assert current.purge_modules == [FLAME.Test.Mod2]
+    assert rel(mock, current.deleted_paths) == [
+             "two/ebin/Elixir.FLAME.Test.CodeSyncMock.Mod2.beam"
+           ]
+
+    assert current.purge_modules == [FLAME.Test.CodeSyncMock.Mod2]
 
     # new diff should have no changes
     current = CodeSync.diff(current)
@@ -59,8 +62,8 @@ defmodule FLAME.CodeSyncTest do
     assert :ok = CodeSync.extract_packaged_stream(pkg)
 
     assert CodeSyncMock.extracted_rel_paths(mock) == [
-             "one/ebin/Elixir.FLAME.Test.Mod1.beam",
-             "two/ebin/Elixir.FLAME.Test.Mod2.beam"
+             "one/ebin/Elixir.FLAME.Test.CodeSyncMock.Mod1.beam",
+             "two/ebin/Elixir.FLAME.Test.CodeSyncMock.Mod2.beam"
            ]
   end
 end

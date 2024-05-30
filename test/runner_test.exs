@@ -4,6 +4,7 @@ defmodule FLAME.RunnerTest do
   import Mox
 
   alias FLAME.{Runner, MockBackend}
+  alias FLAME.Test.CodeSyncMock
 
   # Make sure mocks are verified when the test exits
   setup :set_mox_global
@@ -160,7 +161,7 @@ defmodule FLAME.RunnerTest do
     end
 
     test "multi use" do
-      {:ok, runner} = mock_successful_runner(4, copy_code_paths: true)
+      {:ok, runner} = mock_successful_runner(4)
       Process.monitor(runner)
       assert Runner.remote_boot(runner) == :ok
 
@@ -252,13 +253,33 @@ defmodule FLAME.RunnerTest do
     end
   end
 
-  test "copy_code_paths" do
-    adapter = FLAME.CodeSyncMock.mock_adapter()
-    {:ok, runner} = mock_successful_runner(3, copy_code_paths: adapter)
+  describe "copy_code_paths" do
+    test "copies the code paths and extrats on boot" do
+      mock = CodeSyncMock.new()
+      # the 4th invocation is the rpc to diff code paths
+      {:ok, runner} = mock_successful_runner(4, copy_code_paths: mock.opts)
 
-    Process.monitor(runner)
-    assert Runner.remote_boot(runner) == :ok
-    assert Runner.call(runner, self(), fn -> :works end, timeout: 1234) == :works
-    assert Runner.shutdown(runner) == :ok
+      Process.monitor(runner)
+      assert Runner.remote_boot(runner) == :ok
+      assert Runner.call(runner, self(), fn -> :works end, timeout: 1234) == :works
+      assert Runner.shutdown(runner) == :ok
+      # called on remote boot
+      assert_receive {CodeSyncMock, {_mock, :get_paths, _}}
+      assert_receive {CodeSyncMock, {_mock, :extract_dir, _}}
+
+      # called on :works call
+      assert_receive {CodeSyncMock, {_mock, :get_paths, _}}
+      assert_receive {CodeSyncMock, {_mock, :extract_dir, _}}
+    end
+
+    test "noops by default" do
+      {:ok, runner} = mock_successful_runner(3)
+
+      Process.monitor(runner)
+      assert Runner.remote_boot(runner) == :ok
+      assert Runner.call(runner, self(), fn -> :works end, timeout: 1234) == :works
+      assert Runner.shutdown(runner) == :ok
+      refute_receive {CodeSyncMock, _}
+    end
   end
 end

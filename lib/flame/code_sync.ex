@@ -1,5 +1,10 @@
 defmodule FLAME.CodeSync.PackagedStream do
-  defstruct stream: nil, id: nil, extract_dir: nil, tmp_dir: nil
+  defstruct stream: nil,
+            id: nil,
+            extract_dir: nil,
+            tmp_dir: nil,
+            deleted_paths: [],
+            purge_modules: []
 end
 
 defmodule FLAME.CodeSync do
@@ -32,6 +37,10 @@ defmodule FLAME.CodeSync do
       beams: beam_files,
       hashes: generate_hashes(beam_files)
     }
+  end
+
+  def changed?(%CodeSync{} = code) do
+    code.changed_paths != [] or code.deleted_paths != [] or code.purge_modules != []
   end
 
   def diff(%CodeSync{hashes: prev_hashes} = prev) do
@@ -71,6 +80,8 @@ defmodule FLAME.CodeSync do
       id: code.id,
       tmp_dir: code.tmp_dir,
       extract_dir: code.extract_dir,
+      deleted_paths: code.deleted_paths,
+      purge_modules: code.purge_modules,
       stream: File.stream!(out_path, [], 2048)
     }
   end
@@ -85,8 +96,26 @@ defmodule FLAME.CodeSync do
     Enum.into(pkg.stream, flame_stream)
     :ok = :erl_tar.extract(target_tmp_path, [{:cwd, pkg.extract_dir.()}, :compressed])
     File.rm!(target_tmp_path)
+    # purge any deleted modules
+    for mod <- pkg.purge_modules, do: :code.purge(mod)
+    # delete any deleted code paths, and prune empty dirs
+    for del_path <- pkg.deleted_paths do
+      File.rm!(del_path)
+      ebin_dir = Path.dirname(del_path)
+
+      if File.ls!(ebin_dir) == [] do
+        File.rm_rf!(ebin_dir)
+        :code.del_path(String.to_charlist(ebin_dir))
+      end
+    end
+
+    # reload any changed code
     :c.lm()
     :ok
+  end
+
+  def rm_packaged_stream!(%PackagedStream{} = pkg) do
+    File.rm!(pkg.stream.path)
   end
 
   defp beams(get_paths) do

@@ -253,6 +253,22 @@ defmodule FLAME.Runner do
 
   def handle_call(:checkout, {from_pid, _tag}, state) do
     ref = Process.monitor(from_pid)
+
+    state =
+      case maybe_diff_code_paths(state) do
+        {new_state, nil} ->
+          new_state
+
+        {new_state, %CodeSync.PackagedStream{} = parent_pkg} ->
+          remote_call!(state.runner, state.backend_state, state.runner.boot_timeout, fn ->
+            :ok = CodeSync.extract_packaged_stream(parent_pkg)
+          end)
+
+          CodeSync.rm_packaged_stream!(parent_pkg)
+
+          new_state
+      end
+
     {:reply, {ref, state.runner, state.backend_state}, put_checkout(state, from_pid, ref)}
   end
 
@@ -274,8 +290,8 @@ defmodule FLAME.Runner do
             {:ok, remote_terminator_pid, new_backend_state} when is_pid(remote_terminator_pid) ->
               Process.monitor(remote_terminator_pid)
               new_runner = %Runner{runner | terminator: remote_terminator_pid, status: :booted}
-              {new_runner, parent_stream} = maybe_stream_code_paths(new_runner)
               new_state = %{state | runner: new_runner, backend_state: new_backend_state}
+              {new_state, parent_stream} = maybe_stream_code_paths(new_state)
 
               %Runner{
                 single_use: single_use,
@@ -299,7 +315,7 @@ defmodule FLAME.Runner do
                   end
                 end)
 
-              if parent_stream, do: File.rm!(parent_stream.path)
+              if parent_stream, do: CodeSync.rm_packaged_stream!(parent_stream)
 
               {:reply, :ok, new_state}
 
@@ -311,17 +327,6 @@ defmodule FLAME.Runner do
                     "expected #{inspect(runner.backend)}.remote_boot/1 to return {:ok, remote_terminator_pid, new_state} | {:error, reason}, got: #{inspect(other)}"
           end
         end)
-    end
-  end
-
-  defp maybe_stream_code_paths(%Runner{} = runner) do
-    if adapter = runner.copy_code_paths do
-      code_sync = if is_map(adapter), do: CodeSync.new(adapter), else: CodeSync.new()
-      if is_map(adapter), do: IO.inspect(adapter, label: "CodeSync adapter")
-      parent_stream = CodeSync.package_to_stream(code_sync)
-      {%Runner{runner | code_sync: code_sync}, parent_stream}
-    else
-      {runner, nil}
     end
   end
 
@@ -347,6 +352,14 @@ defmodule FLAME.Runner do
         other when other in [{:ok, nil}, :error] -> {30_000, fn -> true end}
       end
 
+    copy_code_paths =
+      case Keyword.fetch(opts, :copy_code_paths) do
+        {:ok, true} -> []
+        {:ok, false} -> false
+        {:ok, opts} when is_list(opts) -> opts
+        :error -> false
+      end
+
     runner =
       %Runner{
         status: :awaiting_boot,
@@ -360,7 +373,7 @@ defmodule FLAME.Runner do
         idle_shutdown_after: idle_shutdown_after_ms,
         idle_shutdown_check: idle_check,
         terminator: nil,
-        copy_code_paths: Keyword.get(opts, :copy_code_paths, false)
+        copy_code_paths: copy_code_paths
       }
 
     {backend, backend_init} =
@@ -452,6 +465,34 @@ defmodule FLAME.Runner do
             @drain_timeout -> exit(:timeout)
           end
         end)
+    end
+  end
+
+  defp maybe_stream_code_paths(%{runner: %Runner{} = runner} = state) do
+    if copy_opts = runner.copy_code_paths do
+      code_sync = CodeSync.new(copy_opts)
+      %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(code_sync)
+      new_runner = %Runner{runner | code_sync: code_sync}
+      {%{state | runner: new_runner}, parent_stream}
+    else
+      {state, nil}
+    end
+  end
+
+  defp maybe_diff_code_paths(%{runner: %Runner{} = runner} = state) do
+    if runner.code_sync do
+      diffed_code = CodeSync.diff(runner.code_sync)
+      new_runner = %Runner{runner | code_sync: diffed_code}
+      new_state = %{state | runner: new_runner}
+
+      if CodeSync.changed?(diffed_code) do
+        %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(diffed_code)
+        {new_state, parent_stream}
+      else
+        {new_state, nil}
+      end
+    else
+      {state, nil}
     end
   end
 end
