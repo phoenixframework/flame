@@ -38,7 +38,7 @@ defmodule FLAME.FlyBackendTest do
       image: "img",
       app: "app",
       host: "foo.local",
-      env: %{one: 1},
+      env: %{"ONE" => "1"},
       cpu_kind: "performance",
       cpus: 1,
       memory_mb: 256,
@@ -54,9 +54,9 @@ defmodule FLAME.FlyBackendTest do
     assert init.gpu_kind == "a100-pcie-40gb"
 
     assert %{
-             one: 1,
-             FLAME_PARENT: _,
-             PHX_SERVER: "false"
+             "ONE" => "1",
+             "FLAME_PARENT" => _,
+             "PHX_SERVER" => "false"
            } = init.env
   end
 

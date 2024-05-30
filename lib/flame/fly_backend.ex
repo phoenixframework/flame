@@ -192,10 +192,15 @@ defmodule FLAME.FlyBackend do
       |> FLAME.Parent.encode()
 
     new_env =
-      Map.merge(
-        %{PHX_SERVER: "false", FLAME_PARENT: encoded_parent},
-        state.env
-      )
+      %{"PHX_SERVER" => "false", "FLAME_PARENT" => encoded_parent}
+      |> Map.merge(state.env)
+      |> then(fn env ->
+        if flags = System.get_env("ERL_AFLAGS") do
+          Map.put_new(env, "ERL_AFLAGS", flags)
+        else
+          env
+        end
+      end)
 
     new_state =
       %FlyBackend{state | env: new_env, parent_ref: parent_ref, local_ip: ip}
