@@ -71,7 +71,8 @@ defmodule FLAME.Runner do
     `:boot_timeout` - The boot timeout of the runner
     `:shutdown_timeout` - The shutdown timeout
     `:idle_shutdown_after` - The idle shutdown time
-    `:copy_code_paths` - TODO
+    `:copy_code_paths` - The boolean flag on whether to sync code paths on boot. Default `false`.
+    `:sync_code_paths` - The list of code paths to sync on boot and subsequent calls. Default `[]`.
   """
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts)
@@ -341,7 +342,8 @@ defmodule FLAME.Runner do
         :boot_timeout,
         :shutdown_timeout,
         :idle_shutdown_after,
-        :copy_code_paths
+        :copy_code_paths,
+        :sync_code_paths
       ])
 
     {idle_shutdown_after_ms, idle_check} =
@@ -352,12 +354,36 @@ defmodule FLAME.Runner do
         other when other in [{:ok, nil}, :error] -> {30_000, fn -> true end}
       end
 
+    sync_paths =
+      case Keyword.fetch(opts, :sync_code_paths) do
+        {:ok, path_func} when is_function(path_func) ->
+          path_func
+
+        {:ok, other} ->
+          raise ArgumentError,
+                ":sync_code_paths expects a null-arity function which returns a list of paths, got: #{inspect(other)}"
+
+        :error ->
+          nil
+      end
+
     copy_code_paths =
       case Keyword.fetch(opts, :copy_code_paths) do
-        {:ok, true} -> []
-        {:ok, false} -> false
-        {:ok, opts} when is_list(opts) -> opts
-        :error -> false
+        {:ok, true} ->
+          if sync_paths, do: [sync_paths: sync_paths], else: []
+
+        {:ok, false} ->
+          if sync_paths, do: [get_paths: sync_paths, sync_paths: sync_paths], else: false
+
+        {:ok, opts} when is_list(opts) ->
+          if sync_paths do
+            Keyword.merge(opts, sync_paths: sync_paths)
+          else
+            opts
+          end
+
+        :error ->
+          false
       end
 
     runner =

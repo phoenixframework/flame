@@ -12,31 +12,53 @@ defmodule FLAME.CodeSync do
   alias FLAME.CodeSync
   alias FLAME.CodeSync.PackagedStream
 
-  defstruct beams: [],
+  defstruct id: nil,
+            beams: [],
+            computed_sync_beams: MapSet.new(),
             hashes: %{},
             get_paths: nil,
+            sync_paths: nil,
             extract_dir: nil,
             tmp_dir: nil,
             changed_paths: [],
             deleted_paths: [],
-            purge_modules: [],
-            id: nil,
-            opts: []
+            purge_modules: []
 
   def new(opts \\ []) do
-    Keyword.validate!(opts, [:id, :tmp_dir, :extract_dir, :get_paths])
-    get_paths = Keyword.get(opts, :get_paths, &:code.get_path/0)
-    beam_files = beams(get_paths)
-    id = opts[:id] || System.unique_integer([:positive])
+    Keyword.validate!(opts, [:tmp_dir, :extract_dir, :get_paths, :sync_paths])
+    get_paths_func = Keyword.get(opts, :get_paths, &:code.get_path/0)
+    sync_paths_func = Keyword.get(opts, :sync_paths, get_paths_func)
+
+    compute_changes(%CodeSync{
+      id: System.unique_integer([:positive]),
+      get_paths: get_paths_func,
+      sync_paths: sync_paths_func,
+      tmp_dir: Keyword.get(opts, :tmp_dir, &System.tmp_dir!/0),
+      extract_dir: Keyword.get(opts, :extract_dir, fn -> "/" end)
+    })
+  end
+
+  def compute_changes(%CodeSync{} = code) do
+    {all_beams, computed_sync_beams} =
+      if code.get_paths == code.sync_paths do
+        all = beams(code.get_paths.())
+        {all, all}
+      else
+        get_paths_beams = beams(code.get_paths.())
+        sync_paths_beams = beams(code.sync_paths.())
+
+        {Enum.uniq(get_paths_beams ++ sync_paths_beams), sync_paths_beams}
+      end
+
+    hashes =
+      Enum.into(all_beams, %{}, fn path -> {path, :crypto.hash(:md5, File.read!(path))} end)
 
     %CodeSync{
-      id: id,
-      opts: Keyword.put(opts, :id, id),
-      tmp_dir: Keyword.get(opts, :tmp_dir, &System.tmp_dir!/0),
-      extract_dir: Keyword.get(opts, :extract_dir, fn -> "/" end),
-      beams: beam_files,
-      changed_paths: beam_files,
-      hashes: generate_hashes(beam_files)
+      code
+      | computed_sync_beams: MapSet.new(computed_sync_beams),
+        beams: all_beams,
+        changed_paths: all_beams,
+        hashes: hashes
     }
   end
 
@@ -45,7 +67,7 @@ defmodule FLAME.CodeSync do
   end
 
   def diff(%CodeSync{hashes: prev_hashes} = prev) do
-    current = new(prev.opts)
+    current = compute_changes(%CodeSync{prev | get_paths: prev.sync_paths})
 
     changed =
       for path <- current.beams,
@@ -53,7 +75,10 @@ defmodule FLAME.CodeSync do
           do: path
 
     deleted_paths =
-      for path <- prev.beams, not Map.has_key?(current.hashes, path), do: path
+      for path <- prev.beams,
+          not Map.has_key?(current.hashes, path) &&
+            MapSet.member?(prev.computed_sync_beams, path),
+          do: path
 
     module_to_purge =
       for path <- deleted_paths,
@@ -128,7 +153,7 @@ defmodule FLAME.CodeSync do
     File.rm!(pkg.stream.path)
   end
 
-  defp beams(get_paths) do
+  defp beams(computed_paths) do
     otp_lib = :code.lib_dir()
 
     reject_apps =
@@ -137,14 +162,10 @@ defmodule FLAME.CodeSync do
           is_list(ebin),
           do: ebin
 
-    get_paths.()
+    computed_paths
     |> Kernel.--(reject_apps)
     |> Enum.reject(&List.starts_with?(&1, otp_lib))
     |> Enum.flat_map(&Path.wildcard(Path.join(&1, "**/*{.app,.beam}")))
-  end
-
-  defp generate_hashes(beams) when is_list(beams) do
-    Enum.into(beams, %{}, fn path -> {path, :crypto.hash(:md5, File.read!(path))} end)
   end
 
   defp add_code_paths_from_tar(tar_path, extract_dir) do
