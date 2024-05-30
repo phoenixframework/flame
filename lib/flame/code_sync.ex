@@ -35,6 +35,7 @@ defmodule FLAME.CodeSync do
       tmp_dir: Keyword.get(opts, :tmp_dir, &System.tmp_dir!/0),
       extract_dir: Keyword.get(opts, :extract_dir, fn -> "/" end),
       beams: beam_files,
+      changed_paths: beam_files,
       hashes: generate_hashes(beam_files)
     }
   end
@@ -61,7 +62,6 @@ defmodule FLAME.CodeSync do
           mod != basename,
           do: Module.concat([mod])
 
-    dbg()
     %CodeSync{
       current
       | changed_paths: changed,

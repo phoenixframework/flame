@@ -15,7 +15,7 @@ defmodule FLAME.CodeSyncTest do
       assert %CodeSync{
                beams: beams,
                hashes: %{},
-               changed_paths: [],
+               changed_paths: beams,
                deleted_paths: [],
                purge_modules: []
              } = code_sync
