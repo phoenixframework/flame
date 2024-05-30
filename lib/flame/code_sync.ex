@@ -73,7 +73,7 @@ defmodule FLAME.CodeSync do
     out_path = Path.join([code.tmp_dir.(), "flame_parent_code_sync_#{code.id}.tar.gz"])
     dirs = for beam <- beams, uniq: true, do: ~c"#{Path.dirname(beam)}"
     {:ok, tar} = :erl_tar.open(out_path, [:write, :compressed])
-    for dir <- dirs, do: :erl_tar.add(tar, dir, [])
+    for dir <- dirs, do: :erl_tar.add(tar, dir, trim_leading_slash(dir), [:verbose])
     :ok = :erl_tar.close(tar)
 
     %PackagedStream{
@@ -94,7 +94,7 @@ defmodule FLAME.CodeSync do
     flame_stream = File.stream!(target_tmp_path)
     # transfer the file
     Enum.into(pkg.stream, flame_stream)
-    :ok = :erl_tar.extract(target_tmp_path, [{:cwd, pkg.extract_dir.()}, :compressed])
+    :ok = :erl_tar.extract(target_tmp_path, [{:cwd, pkg.extract_dir.()}, :compressed, :verbose])
     File.rm!(target_tmp_path)
     # purge any deleted modules
     for mod <- pkg.purge_modules, do: :code.purge(mod)
