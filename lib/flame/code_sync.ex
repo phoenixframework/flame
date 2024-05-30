@@ -154,17 +154,21 @@ defmodule FLAME.CodeSync do
   end
 
   defp beams(computed_paths) do
-    otp_lib = :code.lib_dir()
+    otp_lib = to_string(:code.lib_dir())
 
     reject_apps =
       for app <- [:flame, :eex, :elixir, :ex_unit, :iex, :logger, :mix],
           ebin = :code.lib_dir(app, :ebin),
           is_list(ebin),
-          do: ebin
+          do: to_string(ebin)
 
     computed_paths
+    |> Enum.map(fn
+      path when is_binary(path) -> path
+      path when is_list(path) -> to_string(path)
+    end)
     |> Kernel.--(reject_apps)
-    |> Enum.reject(&List.starts_with?(&1, otp_lib))
+    |> Enum.reject(&String.starts_with?(&1, otp_lib))
     |> Enum.flat_map(&Path.wildcard(Path.join(&1, "**/*{.app,.beam}")))
   end
 
