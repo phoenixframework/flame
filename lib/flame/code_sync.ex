@@ -73,7 +73,7 @@ defmodule FLAME.CodeSync do
     out_path = Path.join([code.tmp_dir.(), "flame_parent_code_sync_#{code.id}.tar.gz"])
     dirs = for beam <- beams, uniq: true, do: ~c"#{Path.dirname(beam)}"
     {:ok, tar} = :erl_tar.open(out_path, [:write, :compressed])
-    for dir <- dirs, do: :erl_tar.add(tar, dir, trim_leading_slash(dir), [])
+    for dir <- dirs, do: :erl_tar.add(tar, dir, [])
     :ok = :erl_tar.close(tar)
 
     %PackagedStream{
