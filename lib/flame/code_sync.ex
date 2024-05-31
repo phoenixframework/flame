@@ -261,11 +261,10 @@ defmodule FLAME.CodeSync do
     |> Enum.uniq()
     |> then(fn uniq_paths ->
       if pkg.verbose, do: log_verbose("adding code paths: #{inspect(uniq_paths)}")
-      Code.delete_paths(uniq_paths)
       uniq_paths
     end)
     |> Enum.reverse()
-    |> Code.prepend_paths(cache: false)
+    |> Code.prepend_paths(cache: true)
   end
 
   defp log_verbose(msg) do
