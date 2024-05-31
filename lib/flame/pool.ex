@@ -135,7 +135,7 @@ defmodule FLAME.Pool do
         * `:name` - The name of the pool
         * `:count` - The number of runners the pool is attempting to shrink to
 
-    * `:code_sync` – The optional list of options to enable copying and scyncing code paths
+    * `:code_sync` – The optional list of options to enable copying and syncing code paths
       from the parent node to the runner node. Disabled by default. The options are:
 
       * `:copy_paths` – If `true`, the pool will copy the code paths from the parent node
