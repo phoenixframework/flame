@@ -264,6 +264,7 @@ defmodule FLAME.CodeSync do
       Code.delete_paths(uniq_paths)
       uniq_paths
     end)
+    |> Enum.reverse()
     |> Code.prepend_paths(cache: false)
   end
 
