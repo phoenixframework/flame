@@ -144,7 +144,7 @@ defmodule FLAME.CodeSync do
       end
 
     out_stream =
-      if length(code.changed_paths) > 0 do
+      if code.changed_paths != [] do
         out_path = Path.join([code.tmp_dir.(), "flame_parent_code_sync_#{code.id}.tar.gz"])
         dirs = for path <- code.changed_paths, uniq: true, do: String.to_charlist(path)
         {:ok, tar} = :erl_tar.open(out_path, [:write, :compressed])
@@ -185,27 +185,32 @@ defmodule FLAME.CodeSync do
       :ok = add_code_paths_from_tar(pkg, target_tmp_path, extract_dir)
 
       File.rm!(target_tmp_path)
+
       # purge any deleted modules
-      for mod <- pkg.purge_modules, do: :code.purge(IO.inspect(mod, label: "purge"))
+      for mod <- pkg.purge_modules do
+        if pkg.verbose, do: log_verbose("purging #{inspect(pkg.purge_modules)}")
+        :code.purge(mod)
+      end
+
       # delete any deleted code paths, and prune empty dirs
       for del_path <- pkg.deleted_paths do
-        if pkg.verbose, do: log_verbose("deleting path #{del_path}")
         File.rm!(del_path)
         ebin_dir = Path.dirname(del_path)
 
         if File.ls!(ebin_dir) == [] do
+          if pkg.verbose, do: log_verbose("deleting path #{ebin_dir}")
           File.rm_rf!(ebin_dir)
           :code.del_path(String.to_charlist(ebin_dir))
         end
       end
 
       # reload any changed code
-      reloaded_modules = :c.lm()
-      if pkg.verbose, do: log_verbose("reloaded #{inspect(reloaded_modules)}")
+      reloaded = :c.lm()
+      if pkg.verbose && reloaded != [], do: log_verbose("reloaded #{inspect(reloaded)}")
     end
 
     # start any synced apps
-    if length(pkg.apps_to_start) > 0 do
+    if pkg.apps_to_start != [] do
       {:ok, started} = Application.ensure_all_started(pkg.apps_to_start)
       if pkg.verbose, do: log_verbose("started #{inspect(started)}")
     end
