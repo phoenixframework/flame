@@ -5,6 +5,7 @@ defmodule FLAME.CodeSync.PackagedStream do
             extract_dir: nil,
             tmp_dir: nil,
             apps_to_start: [],
+            changed_paths: [],
             deleted_paths: [],
             purge_modules: [],
             verbose: false
@@ -158,6 +159,7 @@ defmodule FLAME.CodeSync do
       id: code.id,
       tmp_dir: code.tmp_dir,
       extract_dir: code.extract_dir,
+      changed_paths: code.changed_paths,
       deleted_paths: code.deleted_paths,
       purge_modules: code.purge_modules,
       apps_to_start: code.apps_to_start,
@@ -182,7 +184,7 @@ defmodule FLAME.CodeSync do
       :ok = :erl_tar.extract(target_tmp_path, [{:cwd, extract_dir}, :compressed | verbose])
 
       # add code paths
-      :ok = add_code_paths_from_tar(pkg, target_tmp_path, extract_dir)
+      :ok = add_code_paths_from_tar(pkg, extract_dir)
 
       File.rm!(target_tmp_path)
 
@@ -240,12 +242,9 @@ defmodule FLAME.CodeSync do
     |> Enum.flat_map(&Path.wildcard(Path.join(&1, "**/*{.app,.beam}")))
   end
 
-  defp add_code_paths_from_tar(%PackagedStream{} = pkg, tar_path, extract_dir) do
-    {:ok, tab} = :erl_tar.table(tar_path, [:compressed])
-
-    tab
+  defp add_code_paths_from_tar(%PackagedStream{} = pkg, extract_dir) do
+    pkg.changed_paths
     |> Enum.map(fn rel_path ->
-      rel_path = to_string(rel_path)
       dir = extract_dir |> Path.join(rel_path) |> Path.dirname()
 
       # purge consolidated protocols
@@ -264,7 +263,7 @@ defmodule FLAME.CodeSync do
       if pkg.verbose, do: log_verbose("adding code paths: #{inspect(uniq_paths)}")
       uniq_paths
     end)
-    |> Code.prepend_paths(cache: false)
+    |> Code.append_paths(cache: false)
   end
 
   defp log_verbose(msg) do
