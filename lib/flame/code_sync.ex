@@ -70,7 +70,7 @@ defmodule FLAME.CodeSync do
       end
 
     hashes =
-      Enum.into(all_beams, %{}, fn path -> {path, :crypto.hash(:md5, File.read!(path))} end)
+      Enum.into(all_beams, %{}, fn path -> {path, :erlang.md5(File.read!(path))} end)
 
     started_apps =
       case code.start_apps do
