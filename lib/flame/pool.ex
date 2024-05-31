@@ -64,8 +64,7 @@ defmodule FLAME.Pool do
             on_grow_start: nil,
             on_grow_end: nil,
             on_shrink: nil,
-            async_boot_timer: nil,
-            copy_code_paths: false
+            async_boot_timer: nil
 
   def child_spec(opts) do
     %{
@@ -136,18 +135,25 @@ defmodule FLAME.Pool do
         * `:name` - The name of the pool
         * `:count` - The number of runners the pool is attempting to shrink to
 
-    * `:copy_code_paths` – If `true`, the pool will copy the code paths from the parent node
-      to the runner node on boot. Then any subsequent FLAME operation will sync code paths
-      from parent to child. Useful when you are starting an image that needs to run
-      dynamic code that is not available on the runner node. Defaults to `false`.
+    * `:code_sync` – The optional list of options to enable copying and scyncing code paths
+      from the parent node to the runner node. Disabled by default. The options are:
 
-    * `:sync_code_paths` – A list of specific code paths to sync to the runner node. Useful
-      when you want to sync specific code paths from the parent instead of sending all code paths.
-      This can be be used in conjunction with `:copy_code_paths`. For example, with `copy_code_paths: true`,
-      and `sync_code_paths: ["/home/app/.cache/.../bin"]`, all the code from the parent will be copied
-      on boot, but only the specific path will be synced on subsequent calls. With `copy_code_paths: false`,
-      and `sync_code_paths: ["/home/app/.cache/.../bin"]`, only the specific path will be synced on boot and
-      for subsequent calls. Defaults to `[]`.
+      * `:copy_paths` – If `true`, the pool will copy the code paths from the parent node
+        to the runner node on boot. Then any subsequent FLAME operation will sync code paths
+        from parent to child. Useful when you are starting an image that needs to run
+        dynamic code that is not available on the runner node. Defaults to `false`.
+
+      * `:sync_paths` – A list of specific code paths to sync to the runner node. Useful
+        when you want to sync specific code paths from the parent instead of sending all code
+        paths. This can be be used in conjunction with `:copy_paths`. For example, with
+        `copy_paths: true`, and `sync_paths: ["/home/app/.cache/.../bin"]`, all the code from
+        the parent will be copied on boot, but only the specific path will be synced on subsequent
+        calls. With `copy_paths: false`, and `sync_paths: ["/home/app/.cache/.../bin"]`,
+        only the specific path will be synced on boot and for subsequent calls. Defaults to `[]`.
+
+      * `:start_apps` – Either a boolean to enable schronizing all started applications from the
+        parent node to the runner node, or a list of specific OTP applications names to sync.
+        Defaults to `false`.
   """
   def start_link(opts) do
     Keyword.validate!(opts, [
@@ -170,9 +176,10 @@ defmodule FLAME.Pool do
       :on_grow_start,
       :on_grow_end,
       :on_shrink,
-      :copy_code_paths,
-      :sync_code_paths
+      :code_sync
     ])
+
+    Keyword.validate!(opts[:code_sync] || [], [:copy_paths, :sync_paths, :start_apps])
 
     GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
   end
@@ -372,8 +379,7 @@ defmodule FLAME.Pool do
           :boot_timeout,
           :shutdown_timeout,
           :idle_shutdown_after,
-          :copy_code_paths,
-          :sync_code_paths
+          :code_sync
         ]
       )
 

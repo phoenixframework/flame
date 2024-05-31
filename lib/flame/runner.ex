@@ -56,7 +56,7 @@ defmodule FLAME.Runner do
             shutdown_timeout: 5_000,
             idle_shutdown_after: nil,
             idle_shutdown_check: nil,
-            copy_code_paths: false,
+            code_sync_opts: false,
             code_sync: nil
 
   @doc """
@@ -71,8 +71,7 @@ defmodule FLAME.Runner do
     `:boot_timeout` - The boot timeout of the runner
     `:shutdown_timeout` - The shutdown timeout
     `:idle_shutdown_after` - The idle shutdown time
-    `:copy_code_paths` - The boolean flag on whether to sync code paths on boot. Default `false`.
-    `:sync_code_paths` - The list of code paths to sync on boot and subsequent calls. Default `[]`.
+    `:code_sync` - The code sync options. See the `FLAME.Pool` module for more information.
   """
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts)
@@ -342,9 +341,11 @@ defmodule FLAME.Runner do
         :boot_timeout,
         :shutdown_timeout,
         :idle_shutdown_after,
-        :copy_code_paths,
-        :sync_code_paths
+        :code_sync
       ])
+
+    code_sync =
+      Keyword.validate!(opts[:code_sync] || [], [:copy_paths, :sync_paths, :start_apps])
 
     {idle_shutdown_after_ms, idle_check} =
       case Keyword.fetch(opts, :idle_shutdown_after) do
@@ -355,31 +356,34 @@ defmodule FLAME.Runner do
       end
 
     sync_paths =
-      case Keyword.fetch(opts, :sync_code_paths) do
+      case Keyword.fetch(code_sync, :sync_paths) do
+        {:ok, path} when is_binary(path) ->
+          fn -> path end
+
         {:ok, path_func} when is_function(path_func) ->
           path_func
 
         {:ok, other} ->
           raise ArgumentError,
-                ":sync_code_paths expects a null-arity function which returns a list of paths, got: #{inspect(other)}"
+                ":sync_paths expects a list of paths or null-arity function which returns a list of paths, got: #{inspect(other)}"
 
         :error ->
           nil
       end
 
-    copy_code_paths =
-      case Keyword.fetch(opts, :copy_code_paths) do
+    code_sync_opts =
+      case Keyword.fetch(code_sync, :copy_paths) do
         {:ok, true} ->
           if sync_paths, do: [sync_paths: sync_paths], else: []
 
         {:ok, false} ->
           if sync_paths, do: [get_paths: sync_paths, sync_paths: sync_paths], else: false
 
-        {:ok, opts} when is_list(opts) ->
+        {:ok, private_opts} when is_list(private_opts) ->
           if sync_paths do
-            Keyword.merge(opts, sync_paths: sync_paths)
+            Keyword.merge(private_opts, sync_paths: sync_paths)
           else
-            opts
+            private_opts
           end
 
         :error ->
@@ -399,7 +403,7 @@ defmodule FLAME.Runner do
         idle_shutdown_after: idle_shutdown_after_ms,
         idle_shutdown_check: idle_check,
         terminator: nil,
-        copy_code_paths: copy_code_paths
+        code_sync_opts: code_sync_opts
       }
 
     {backend, backend_init} =
@@ -495,8 +499,8 @@ defmodule FLAME.Runner do
   end
 
   defp maybe_stream_code_paths(%{runner: %Runner{} = runner} = state) do
-    if copy_opts = runner.copy_code_paths do
-      code_sync = CodeSync.new(copy_opts)
+    if code_sync_opts = runner.code_sync_opts do
+      code_sync = CodeSync.new(code_sync_opts)
       %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(code_sync)
       new_runner = %Runner{runner | code_sync: code_sync}
       {%{state | runner: new_runner}, parent_stream}

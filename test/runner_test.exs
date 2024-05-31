@@ -253,11 +253,11 @@ defmodule FLAME.RunnerTest do
     end
   end
 
-  describe "copy_code_paths" do
-    test "copies the code paths and extrats on boot" do
+  describe "code_sync" do
+    test "copy_paths: true, copies the code paths and extracts on boot" do
       mock = CodeSyncMock.new()
       # the 4th invocation is the rpc to diff code paths
-      {:ok, runner} = mock_successful_runner(4, copy_code_paths: mock.opts)
+      {:ok, runner} = mock_successful_runner(4, code_sync: [copy_paths: mock.opts])
 
       Process.monitor(runner)
       assert Runner.remote_boot(runner) == :ok
