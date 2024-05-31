@@ -190,6 +190,7 @@ defmodule FLAME.CodeSync do
       for mod <- pkg.purge_modules do
         if pkg.verbose, do: log_verbose("purging #{inspect(pkg.purge_modules)}")
         :code.purge(mod)
+        :code.delete(mod)
       end
 
       # delete any deleted code paths, and prune empty dirs
@@ -249,9 +250,11 @@ defmodule FLAME.CodeSync do
 
       # purge consolidated protocols
       with "consolidated" <- Path.basename(dir),
-           [mod, ""] <- rel_path |> Path.basename() |> String.split(".beam") do
-        if pkg.verbose, do: log_verbose("purging consolidated protocol #{mod}")
-        :code.purge(Module.concat([mod]))
+           [mod_str, ""] <- rel_path |> Path.basename() |> String.split(".beam") do
+        mod = Module.concat([mod_str])
+        if pkg.verbose, do: log_verbose("purging consolidated protocol #{inspect(mod)}")
+        :code.purge(mod)
+        :code.delete(mod)
       end
 
       dir
@@ -261,7 +264,7 @@ defmodule FLAME.CodeSync do
       if pkg.verbose, do: log_verbose("adding code paths: #{inspect(uniq_paths)}")
       uniq_paths
     end)
-    |> Enum.each(fn code_path -> :code.add_path(String.to_charlist(code_path)) end)
+    |> Enum.each(fn code_path -> :code.add_patha(String.to_charlist(code_path), :nocache) end)
   end
 
   defp log_verbose(msg) do
