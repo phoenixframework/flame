@@ -357,10 +357,10 @@ defmodule FLAME.Runner do
 
     sync_paths =
       case Keyword.fetch(code_sync, :sync_paths) do
-        {:ok, path} when is_binary(path) ->
-          fn -> path end
+        {:ok, paths} when is_list(paths) ->
+          fn -> paths end
 
-        {:ok, path_func} when is_function(path_func) ->
+        {:ok, path_func} when is_function(path_func, 0) ->
           path_func
 
         {:ok, other} ->
