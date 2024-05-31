@@ -243,7 +243,21 @@ defmodule FLAME.CodeSync do
     {:ok, tab} = :erl_tar.table(tar_path, [:compressed])
 
     tab
-    |> Enum.map(fn rel_path -> extract_dir |> Path.join(to_string(rel_path)) |> Path.dirname() end)
+    |> Enum.map(fn rel_path ->
+      rel_path = to_string(rel_path)
+      full_path = Path.join(extract_dir, rel_path)
+      dir = Path.dirname(full_path)
+
+      # purge consolidated protocols
+      with "consolidated" <- Path.basename(dir),
+           [mod, ""] <- rel_path |> Path.basename() |> String.split(".beam") do
+        if pkg.verbose, do: log_verbose("purging consolidated protocol #{mod}")
+        File.rm!(full_path)
+        :code.purge(Module.concat([mod]))
+      end
+
+      dir
+    end)
     |> Enum.uniq()
     |> then(fn uniq_paths ->
       if pkg.verbose, do: log_verbose("adding code paths: #{inspect(uniq_paths)}")
