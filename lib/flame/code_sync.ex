@@ -233,10 +233,7 @@ defmodule FLAME.CodeSync do
           do: to_string(ebin)
 
     computed_paths
-    |> Enum.map(fn
-      path when is_binary(path) -> path
-      path when is_list(path) -> to_string(path)
-    end)
+    |> Enum.map(&to_string/1)
     |> Kernel.--(reject_apps)
     |> Enum.reject(&String.starts_with?(&1, otp_lib))
     |> Enum.flat_map(&Path.wildcard(Path.join(&1, "**/*{.app,.beam}")))
