@@ -1,4 +1,5 @@
 defmodule FLAME.CodeSync.PackagedStream do
+  @moduledoc false
   defstruct stream: nil,
             id: nil,
             extract_dir: nil,
