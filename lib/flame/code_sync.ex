@@ -264,7 +264,7 @@ defmodule FLAME.CodeSync do
       if pkg.verbose, do: log_verbose("adding code paths: #{inspect(uniq_paths)}")
       uniq_paths
     end)
-    |> Enum.each(fn code_path -> :code.add_patha(String.to_charlist(code_path), :nocache) end)
+    |> Code.prepend_paths(cache: false)
   end
 
   defp log_verbose(msg) do
