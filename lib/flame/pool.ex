@@ -157,6 +157,28 @@ defmodule FLAME.Pool do
 
       * `:verbose` – If `true`, the pool will log verbose information about the code sync process.
         Defaults to `false`.
+
+      For example, in [Livebook](https://livebook.dev/), to start a pool with code sync enabled:
+
+          Mix.install([:kino, :flame])
+
+          Kino.start_child!(
+            {FLAME.Pool,
+              name: :my_flame,
+              code_sync: [
+                copy_paths: true,
+                sync_paths: [Path.join(System.tmp_dir!(), "livebook_runtime")]
+              ],
+              min: 1,
+              max: 1,
+              max_concurrency: 10,
+              backend: {FLAME.FlyBackend,
+                cpu_kind: "performance", cpus: 4, memory_mb: 8192,
+                token: System.fetch_env!("FLY_API_TOKEN"),
+                env: Map.take(System.get_env(), ["LIVEBOOK_COOKIE"]),
+              },
+              idle_shutdown_after: :timer.minutes(5)}
+          )
   """
   def start_link(opts) do
     Keyword.validate!(opts, [
