@@ -245,14 +245,12 @@ defmodule FLAME.CodeSync do
     tab
     |> Enum.map(fn rel_path ->
       rel_path = to_string(rel_path)
-      full_path = Path.join(extract_dir, rel_path)
-      dir = Path.dirname(full_path)
+      dir = extract_dir |> Path.join(rel_path) |> Path.dirname()
 
       # purge consolidated protocols
       with "consolidated" <- Path.basename(dir),
            [mod, ""] <- rel_path |> Path.basename() |> String.split(".beam") do
         if pkg.verbose, do: log_verbose("purging consolidated protocol #{mod}")
-        File.rm!(full_path)
         :code.purge(Module.concat([mod]))
       end
 
