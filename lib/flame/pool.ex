@@ -154,6 +154,9 @@ defmodule FLAME.Pool do
       * `:start_apps` – Either a boolean to enable schronizing all started applications from the
         parent node to the runner node, or a list of specific OTP applications names to sync.
         Defaults to `false`.
+
+      * `:verbose` – If `true`, the pool will log verbose information about the code sync process.
+        Defaults to `false`.
   """
   def start_link(opts) do
     Keyword.validate!(opts, [
@@ -179,7 +182,7 @@ defmodule FLAME.Pool do
       :code_sync
     ])
 
-    Keyword.validate!(opts[:code_sync] || [], [:copy_paths, :sync_paths, :start_apps])
+    Keyword.validate!(opts[:code_sync] || [], [:copy_paths, :sync_paths, :start_apps, :verbose])
 
     GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
   end

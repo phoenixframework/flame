@@ -14,7 +14,7 @@ defmodule FLAME.Test.CodeSyncMock do
   defstruct opts: nil, id: nil
   alias FLAME.Test.CodeSyncMock
 
-  def new do
+  def new(opts \\ []) do
     test_pid = self()
     id = System.unique_integer([:positive])
     tmp_dir = File.cwd!() |> Path.join("tmp") |> Path.expand()
@@ -35,7 +35,7 @@ defmodule FLAME.Test.CodeSyncMock do
       obj_code(FLAME.Test.CodeSyncMock.Mod2)
     )
 
-    opts = [
+    default_opts = [
       get_paths: fn ->
         paths = Enum.map(Path.wildcard(Path.join(working_dir, "*")), &String.to_charlist/1)
         send(test_pid, {CodeSyncMock, {id, :get_paths, paths}})
@@ -50,7 +50,7 @@ defmodule FLAME.Test.CodeSyncMock do
       end
     ]
 
-    %CodeSyncMock{id: id, opts: opts}
+    %CodeSyncMock{id: id, opts: Keyword.merge(default_opts, opts)}
   end
 
   def simulate_changes(%CodeSyncMock{id: id} = mock) do

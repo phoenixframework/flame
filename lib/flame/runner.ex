@@ -345,7 +345,7 @@ defmodule FLAME.Runner do
       ])
 
     code_sync =
-      Keyword.validate!(opts[:code_sync] || [], [:copy_paths, :sync_paths, :start_apps])
+      Keyword.validate!(opts[:code_sync] || [], [:copy_paths, :sync_paths, :start_apps, :verbose])
 
     {idle_shutdown_after_ms, idle_check} =
       case Keyword.fetch(opts, :idle_shutdown_after) do
@@ -388,6 +388,13 @@ defmodule FLAME.Runner do
 
         :error ->
           false
+      end
+
+    code_sync_opts =
+      if code_sync_opts && code_sync[:verbose] do
+        Keyword.put(code_sync_opts, :verbose, true)
+      else
+        code_sync_opts
       end
 
     runner =
