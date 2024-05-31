@@ -214,7 +214,8 @@ defmodule FLAME.CodeSync do
   end
 
   def rm_packaged_stream!(%PackagedStream{} = pkg) do
-    File.rm!(pkg.stream.path)
+    if pkg.stream, do: File.rm!(pkg.stream.path)
+    :ok
   end
 
   defp beams(computed_paths) do
