@@ -24,7 +24,7 @@ defmodule FLAME.RunnerTest do
   }
 
   defp remote_boot(state) do
-    parent = FLAME.Parent.new(make_ref(), self(), MockBackend, "MY_HOST_IP")
+    parent = FLAME.Parent.new(make_ref(), self(), MockBackend, "app-flame-1", "MY_HOST_IP")
     name = Module.concat(FLAME.TerminatorTest, to_string(System.unique_integer([:positive])))
     opts = [name: name, parent: parent]
     spec = Supervisor.child_spec({FLAME.Terminator, opts}, restart: :temporary)
