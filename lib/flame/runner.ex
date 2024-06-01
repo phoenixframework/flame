@@ -344,8 +344,14 @@ defmodule FLAME.Runner do
         :code_sync
       ])
 
-    code_sync =
-      Keyword.validate!(opts[:code_sync] || [], [:copy_paths, :sync_paths, :start_apps, :verbose])
+    Keyword.validate!(opts[:code_sync] || [], [
+      :copy_paths,
+      :sync_beams,
+      :start_apps,
+      :tmp_dir,
+      :extract_dir,
+      :verbose
+    ])
 
     {idle_shutdown_after_ms, idle_check} =
       case Keyword.fetch(opts, :idle_shutdown_after) do
@@ -353,48 +359,6 @@ defmodule FLAME.Runner do
         {:ok, ms} when is_integer(ms) -> {ms, fn -> true end}
         {:ok, {ms, func}} when is_integer(ms) and is_function(func, 0) -> {ms, func}
         other when other in [{:ok, nil}, :error] -> {30_000, fn -> true end}
-      end
-
-    sync_paths =
-      case Keyword.fetch(code_sync, :sync_paths) do
-        {:ok, paths} when is_list(paths) ->
-          fn -> paths end
-
-        {:ok, path_func} when is_function(path_func, 0) ->
-          path_func
-
-        {:ok, other} ->
-          raise ArgumentError,
-                ":sync_paths expects a list of paths or null-arity function which returns a list of paths, got: #{inspect(other)}"
-
-        :error ->
-          nil
-      end
-
-    code_sync_opts =
-      case Keyword.fetch(code_sync, :copy_paths) do
-        {:ok, true} ->
-          if sync_paths, do: [sync_paths: sync_paths], else: []
-
-        {:ok, false} ->
-          if sync_paths, do: [get_paths: sync_paths, sync_paths: sync_paths], else: false
-
-        {:ok, private_opts} when is_list(private_opts) ->
-          if sync_paths do
-            Keyword.merge(private_opts, sync_paths: sync_paths)
-          else
-            private_opts
-          end
-
-        :error ->
-          false
-      end
-
-    code_sync_opts =
-      if code_sync_opts && code_sync[:verbose] do
-        Keyword.put(code_sync_opts, :verbose, true)
-      else
-        code_sync_opts
       end
 
     runner =
@@ -410,7 +374,7 @@ defmodule FLAME.Runner do
         idle_shutdown_after: idle_shutdown_after_ms,
         idle_shutdown_check: idle_check,
         terminator: nil,
-        code_sync_opts: code_sync_opts
+        code_sync_opts: Keyword.get(opts, :code_sync, false)
       }
 
     {backend, backend_init} =

@@ -35,18 +35,16 @@ defmodule FLAME.Test.CodeSyncMock do
       obj_code(FLAME.Test.CodeSyncMock.Mod2)
     )
 
+    extract_dir = Path.join([tmp_dir, "#{id}", "extracted_code"])
+    File.mkdir_p!(extract_dir)
+
     default_opts = [
-      get_paths: fn ->
-        paths = Enum.map(Path.wildcard(Path.join(working_dir, "*")), &String.to_charlist/1)
-        send(test_pid, {CodeSyncMock, {id, :get_paths, paths}})
-        paths
-      end,
+      copy_paths: Path.wildcard(Path.join(working_dir, "*/ebin")),
+      sync_beams: [working_dir],
       tmp_dir: fn -> tmp_dir end,
       extract_dir: fn ->
-        dir = Path.join([tmp_dir, "#{id}", "extracted_code"])
-        File.mkdir_p!(dir)
-        send(test_pid, {CodeSyncMock, {id, :extract_dir, dir}})
-        dir
+        send(test_pid, {CodeSyncMock, {id, :extract}})
+        extract_dir
       end
     ]
 

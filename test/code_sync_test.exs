@@ -16,39 +16,33 @@ defmodule FLAME.CodeSyncTest do
   end
 
   describe "new/0" do
-    test "creates a new struct with beams and hashes" do
+    test "creates a new struct with change tracking" do
       mock = CodeSyncMock.new()
       code_sync = CodeSync.new(mock.opts)
 
       assert %CodeSync{
-               beams: beams,
-               hashes: %{},
-               changed_paths: beams,
+               sync_beam_hashes: %{},
+               changed_paths: changed_paths,
                deleted_paths: [],
                purge_modules: []
              } = code_sync
 
       assert code_sync.apps_to_start == started_apps()
 
-      assert rel(mock, beams) == [
+      assert rel(mock, changed_paths) == [
                "one/ebin/Elixir.FLAME.Test.CodeSyncMock.Mod1.beam",
                "two/ebin/Elixir.FLAME.Test.CodeSyncMock.Mod2.beam"
              ]
     end
   end
 
-  test "identifies changed, added, and deleted paths, and newly started apps" do
-    # cheap way to ensure apps are started on extract. Note async: false is required
-    Application.stop(:logger)
-    refute :logger in started_apps()
+  test "identifies changed, added, and deleted beams" do
     mock = CodeSyncMock.new()
     previous = CodeSync.new(mock.opts)
     # simulate change to mod1, new mod3, and deleted mod2
     :ok = CodeSyncMock.simulate_changes(mock)
 
-    Application.ensure_started(:logger)
     current = CodeSync.diff(previous)
-    assert current.apps_to_start == [:logger]
 
     assert rel(mock, current.changed_paths) == [
              "one/ebin/Elixir.FLAME.Test.CodeSyncMock.Mod1.beam",
@@ -67,7 +61,6 @@ defmodule FLAME.CodeSyncTest do
     assert current.deleted_paths == []
     assert current.purge_modules == []
     assert current.apps_to_start == []
-    assert :logger in started_apps()
   end
 
   test "start_apps: false, does not sync started apps" do
@@ -97,13 +90,13 @@ defmodule FLAME.CodeSyncTest do
   end
 
   test "packages and extracts packaged code and starts apps by default" do
+    assert :logger in started_apps()
     mock = CodeSyncMock.new()
     code = CodeSync.new(mock.opts)
     assert %FLAME.CodeSync.PackagedStream{} = pkg = CodeSync.package_to_stream(code)
     assert File.exists?(pkg.stream.path)
 
     # cheap way to ensure apps are started on extract. Note async: false is required
-    assert :logger in started_apps()
     Application.stop(:logger)
     refute :logger in started_apps()
 

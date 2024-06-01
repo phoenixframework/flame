@@ -143,17 +143,18 @@ defmodule FLAME.Pool do
         from parent to child. Useful when you are starting an image that needs to run
         dynamic code that is not available on the runner node. Defaults to `false`.
 
-      * `:sync_paths` – A list of specific code paths to sync to the runner node. Useful
-        when you want to sync specific code paths from the parent instead of sending all code
-        paths. This can be be used in conjunction with `:copy_paths`. For example, with
-        `copy_paths: true`, and `sync_paths: ["/home/app/.cache/.../bin"]`, all the code from
-        the parent will be copied on boot, but only the specific path will be synced on subsequent
-        calls. With `copy_paths: false`, and `sync_paths: ["/home/app/.cache/.../bin"]`,
-        only the specific path will be synced on boot and for subsequent calls. Defaults to `[]`.
+      * `:sync_beams` – A list of specific beam code paths to sync to the runner node. Useful
+        when you want to sync specific beam code paths from the parent after sending all code
+        paths from `:copy_paths` on initial boot. For example, with `copy_paths: true`,
+        and `sync_beams: ["/home/app/.cache/.../ebin"]`, all the code from the parent will be
+        copied on boot, but only the specific beam files will be synced on subsequent calls.
+        With `copy_paths: false`, and `sync_beams: ["/home/app/.cache/.../ebin"]`,
+        only the specific beam files will be synced on boot and for subsequent calls.
+        Defaults to `[]`.
 
-      * `:start_apps` – Either a boolean to enable schronizing all started applications from the
-        parent node to the runner node, or a list of specific OTP applications names to sync.
-        Defaults to `false`.
+      * `:start_apps` – Either a boolean or a list of specific OTP applications names to start
+        when the runner boots. When `true`, all applications currently running on the parent node
+        are sent to the runner node to be started. Defaults to `false`.
 
       * `:verbose` – If `true`, the pool will log verbose information about the code sync process.
         Defaults to `false`.
@@ -166,8 +167,9 @@ defmodule FLAME.Pool do
             {FLAME.Pool,
               name: :my_flame,
               code_sync: [
+                start_apps: true,
                 copy_paths: true,
-                sync_paths: [Path.join(System.tmp_dir!(), "livebook_runtime")]
+                sync_beams: [Path.join(System.tmp_dir!(), "livebook_runtime")]
               ],
               min: 1,
               max: 1,
@@ -204,7 +206,7 @@ defmodule FLAME.Pool do
       :code_sync
     ])
 
-    Keyword.validate!(opts[:code_sync] || [], [:copy_paths, :sync_paths, :start_apps, :verbose])
+    Keyword.validate!(opts[:code_sync] || [], [:copy_paths, :sync_beams, :start_apps, :verbose])
 
     GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
   end

@@ -19,15 +19,12 @@ defmodule FLAME.CodeSync do
   alias FLAME.CodeSync.PackagedStream
 
   defstruct id: nil,
-            beams: [],
-            computed_sync_beams: MapSet.new(),
-            hashes: %{},
-            get_paths: nil,
-            sync_paths: nil,
+            sync_beam_hashes: {},
+            copy_paths: nil,
+            sync_beams: nil,
             extract_dir: nil,
             tmp_dir: nil,
             start_apps: true,
-            started_apps: [],
             apps_to_start: [],
             changed_paths: [],
             deleted_paths: [],
@@ -38,19 +35,39 @@ defmodule FLAME.CodeSync do
     Keyword.validate!(opts, [
       :tmp_dir,
       :extract_dir,
-      :get_paths,
-      :sync_paths,
+      :copy_paths,
+      :sync_beams,
       :start_apps,
       :verbose
     ])
 
-    get_paths_func = Keyword.get(opts, :get_paths, &:code.get_path/0)
-    sync_paths_func = Keyword.get(opts, :sync_paths, get_paths_func)
+    copy_paths =
+      case Keyword.fetch(opts, :copy_paths) do
+        val when val in [{:ok, false}, :error] ->
+          []
+
+        {:ok, paths} when is_list(paths) ->
+          paths
+
+        {:ok, true} ->
+          otp_lib = :code.lib_dir()
+
+          reject_apps =
+            for app <- [:flame, :eex, :elixir, :ex_unit, :iex, :logger, :mix],
+                ebin = :code.lib_dir(app, :ebin),
+                is_list(ebin),
+                do: ebin
+
+          :code.get_path()
+          |> Kernel.--([~c"." | reject_apps])
+          |> Enum.reject(fn path -> List.starts_with?(path, otp_lib) end)
+          |> Enum.map(&to_string/1)
+      end
 
     compute_changes(%CodeSync{
       id: System.unique_integer([:positive]),
-      get_paths: get_paths_func,
-      sync_paths: sync_paths_func,
+      copy_paths: copy_paths,
+      sync_beams: Keyword.get(opts, :sync_beams, []),
       tmp_dir: Keyword.get(opts, :tmp_dir, &System.tmp_dir!/0),
       extract_dir: Keyword.get(opts, :extract_dir, fn -> "/" end),
       start_apps: Keyword.get(opts, :start_apps, true),
@@ -59,21 +76,16 @@ defmodule FLAME.CodeSync do
   end
 
   def compute_changes(%CodeSync{} = code) do
-    {all_beams, computed_sync_beams} =
-      if code.get_paths == code.sync_paths do
-        all = beams(code.get_paths.())
-        {all, all}
-      else
-        get_paths_beams = beams(code.get_paths.())
-        sync_paths_beams = beams(code.sync_paths.())
+    copy_files = lookup_copy_files(code.copy_paths)
+    sync_beams_files = lookup_sync_beams_files(code.sync_beams)
+    all_paths = Enum.uniq(copy_files ++ sync_beams_files)
 
-        {Enum.uniq(get_paths_beams ++ sync_paths_beams), sync_paths_beams}
-      end
+    beam_hashes =
+      for path <- sync_beams_files,
+          into: %{},
+          do: {path, :erlang.md5(File.read!(path))}
 
-    hashes =
-      Enum.into(all_beams, %{}, fn path -> {path, :erlang.md5(File.read!(path))} end)
-
-    started_apps =
+    apps_to_start =
       case code.start_apps do
         true ->
           Enum.map(Application.started_applications(), fn {app, _desc, _vsn} -> app end)
@@ -87,32 +99,29 @@ defmodule FLAME.CodeSync do
 
     %CodeSync{
       code
-      | computed_sync_beams: MapSet.new(computed_sync_beams),
-        beams: all_beams,
-        changed_paths: all_beams,
-        hashes: hashes,
-        started_apps: started_apps,
-        apps_to_start: started_apps
+      | changed_paths: all_paths,
+        sync_beam_hashes: beam_hashes,
+        apps_to_start: apps_to_start
     }
   end
 
   def changed?(%CodeSync{} = code) do
-    code.changed_paths != [] or code.deleted_paths != [] or code.purge_modules != [] or
-      code.apps_to_start != []
+    code.changed_paths != [] or code.deleted_paths != [] or code.purge_modules != []
   end
 
-  def diff(%CodeSync{hashes: prev_hashes} = prev) do
-    current = compute_changes(%CodeSync{prev | get_paths: prev.sync_paths})
+  def diff(%CodeSync{sync_beam_hashes: prev_hashes} = prev) do
+    current = compute_changes(%CodeSync{prev | copy_paths: []})
 
     changed =
-      for path <- current.beams,
-          current.hashes[path] != prev_hashes[path],
+      for kv <- current.sync_beam_hashes,
+          {path, current_hash} = kv,
+          current_hash != prev_hashes[path],
           do: path
 
     deleted_paths =
-      for path <- prev.beams,
-          not Map.has_key?(current.hashes, path) &&
-            MapSet.member?(prev.computed_sync_beams, path),
+      for kv <- prev.sync_beam_hashes,
+          {path, _prev_hash} = kv,
+          not Map.has_key?(current.sync_beam_hashes, path),
           do: path
 
     module_to_purge =
@@ -122,14 +131,12 @@ defmodule FLAME.CodeSync do
           mod != basename,
           do: Module.concat([mod])
 
-    apps_to_start = current.started_apps -- prev.started_apps
-
     %CodeSync{
       current
       | changed_paths: changed,
         deleted_paths: deleted_paths,
-        apps_to_start: apps_to_start,
-        purge_modules: module_to_purge
+        purge_modules: module_to_purge,
+        apps_to_start: []
     }
   end
 
@@ -226,26 +233,33 @@ defmodule FLAME.CodeSync do
     :ok
   end
 
-  defp beams(computed_paths) do
-    otp_lib = to_string(:code.lib_dir())
+  defp lookup_sync_beams_files(paths) do
+    paths
+    |> Enum.flat_map(&Path.wildcard(Path.join(&1, "**/*.beam")))
+    |> Enum.uniq()
+  end
 
-    reject_apps =
-      for app <- [:flame, :eex, :elixir, :ex_unit, :iex, :logger, :mix],
-          ebin = :code.lib_dir(app, :ebin),
-          is_list(ebin),
-          do: to_string(ebin)
-
-    computed_paths
-    |> Enum.map(&to_string/1)
-    |> Kernel.--(["." | reject_apps])
-    |> Enum.reject(&String.starts_with?(&1, otp_lib))
-    |> Enum.flat_map(&Path.wildcard(Path.join(&1, "**/*{.app,.beam}")))
+  defp lookup_copy_files(paths) do
+    # include ebin's parent if basename is ebin (will include priv)
+    paths
+    |> Stream.map(fn parent_dir ->
+      case Path.basename(parent_dir) do
+        "ebin" -> Path.join(Path.dirname(parent_dir), "**/*")
+        _ -> Path.join(parent_dir, "*")
+      end
+    end)
+    |> Stream.uniq()
+    |> Stream.flat_map(fn glob -> Path.wildcard(glob) end)
+    |> Stream.uniq()
+    |> Enum.filter(fn path -> File.regular?(path, [:raw]) end)
   end
 
   defp add_code_paths_from_tar(%PackagedStream{} = pkg, extract_dir) do
     pkg.changed_paths
     |> Enum.map(fn rel_path ->
       dir = extract_dir |> Path.join(rel_path) |> Path.dirname()
+
+      # todo filter only ebins
 
       # purge consolidated protocols
       with "consolidated" <- Path.basename(dir),
