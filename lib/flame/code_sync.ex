@@ -255,35 +255,35 @@ defmodule FLAME.CodeSync do
   end
 
   defp add_code_paths_from_tar(%PackagedStream{} = pkg, extract_dir) do
-    current_code_paths = Enum.map(:code.get_path(), &to_string/1)
+    pkg.changed_paths
+    |> Enum.map(fn rel_path ->
+      dir = extract_dir |> Path.join(rel_path) |> Path.dirname()
 
-    changed_code_paths =
-      pkg.changed_paths
-      |> Enum.map(fn rel_path ->
-        dir = extract_dir |> Path.join(rel_path) |> Path.dirname()
+      # todo filter only ebins
 
-        # todo filter only ebins
+      # purge consolidated protocols
+      with "consolidated" <- Path.basename(dir),
+           [mod_str, ""] <- rel_path |> Path.basename() |> String.split(".beam") do
+        mod = Module.concat([mod_str])
+        if pkg.verbose, do: log_verbose("purging consolidated protocol #{inspect(mod)}")
+        :code.purge(mod)
+        :code.delete(mod)
+      end
 
-        # purge consolidated protocols
-        with "consolidated" <- Path.basename(dir),
-             [mod_str, ""] <- rel_path |> Path.basename() |> String.split(".beam") do
-          mod = Module.concat([mod_str])
-          if pkg.verbose, do: log_verbose("purging consolidated protocol #{inspect(mod)}")
-          :code.purge(mod)
-          :code.delete(mod)
-        end
-
-        dir
-      end)
-      |> Enum.uniq()
-      |> then(fn uniq_paths ->
-        if pkg.verbose, do: log_verbose("adding code paths: #{inspect(uniq_paths)}")
-        uniq_paths
-      end)
-
-    Enum.uniq(current_code_paths ++ changed_code_paths)
+      dir
+    end)
+    |> Enum.uniq()
+    |> then(fn uniq_paths ->
+      if pkg.verbose, do: log_verbose("adding code paths: #{inspect(uniq_paths)}")
+      uniq_paths
+    end)
     |> Enum.reverse()
     |> Code.prepend_paths(cache: true)
+    raise """
+    TODO when I return: after diff sync, the sync_beams end up at the top of the code path,
+    above consolidated protocols, which is wrong. Probably need special protocol consolidation
+    awareness here, or don't reverse on diff
+    """
   end
 
   defp log_verbose(msg) do
