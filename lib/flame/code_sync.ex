@@ -255,28 +255,32 @@ defmodule FLAME.CodeSync do
   end
 
   defp add_code_paths_from_tar(%PackagedStream{} = pkg, extract_dir) do
-    pkg.changed_paths
-    |> Enum.map(fn rel_path ->
-      dir = extract_dir |> Path.join(rel_path) |> Path.dirname()
+    current_code_paths = Enum.map(:code.get_path(), &to_string/1)
 
-      # todo filter only ebins
+    changed_code_paths =
+      pkg.changed_paths
+      |> Enum.map(fn rel_path ->
+        dir = extract_dir |> Path.join(rel_path) |> Path.dirname()
 
-      # purge consolidated protocols
-      with "consolidated" <- Path.basename(dir),
-           [mod_str, ""] <- rel_path |> Path.basename() |> String.split(".beam") do
-        mod = Module.concat([mod_str])
-        if pkg.verbose, do: log_verbose("purging consolidated protocol #{inspect(mod)}")
-        :code.purge(mod)
-        :code.delete(mod)
-      end
+        # todo filter only ebins
 
-      dir
-    end)
-    |> Enum.uniq()
-    |> then(fn uniq_paths ->
-      if pkg.verbose, do: log_verbose("adding code paths: #{inspect(uniq_paths)}")
-      uniq_paths
-    end)
+        # purge consolidated protocols
+        with "consolidated" <- Path.basename(dir),
+             [mod_str, ""] <- rel_path |> Path.basename() |> String.split(".beam") do
+          mod = Module.concat([mod_str])
+          if pkg.verbose, do: log_verbose("purging consolidated protocol #{inspect(mod)}")
+          :code.purge(mod)
+          :code.delete(mod)
+        end
+
+        dir
+      end)
+      |> then(fn uniq_paths ->
+        if pkg.verbose, do: log_verbose("adding code paths: #{inspect(uniq_paths)}")
+        uniq_paths
+      end)
+
+    Enum.uniq(changed_code_paths ++ current_code_paths)
     |> Enum.reverse()
     |> Code.prepend_paths(cache: true)
   end
