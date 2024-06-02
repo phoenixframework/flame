@@ -143,8 +143,11 @@ defmodule FLAME.CodeSync do
   def package_to_stream(%CodeSync{} = code) do
     verbose =
       if code.verbose do
-        log_verbose("packaging changed_paths: #{inspect(code.changed_paths)}")
-        log_verbose("sending apps_to_start: #{inspect(code.apps_to_start)}")
+        if !Enum.empty?(code.changed_paths),
+          do: log_verbose("packaging changed_paths: #{inspect(code.changed_paths)}")
+
+        if !Enum.empty?(code.apps_to_start),
+          do: log_verbose("sending apps_to_start: #{inspect(code.apps_to_start)}")
 
         [:verbose]
       else
@@ -197,7 +200,9 @@ defmodule FLAME.CodeSync do
 
       # purge any deleted modules
       for mod <- pkg.purge_modules do
-        if pkg.verbose, do: log_verbose("purging #{inspect(pkg.purge_modules)}")
+        if pkg.verbose && !Enum.empty?(pkg.purge_modules),
+          do: log_verbose("purging #{inspect(pkg.purge_modules)}")
+
         :code.purge(mod)
         :code.delete(mod)
       end
@@ -216,11 +221,11 @@ defmodule FLAME.CodeSync do
 
       # reload any changed code
       reloaded = :c.lm()
-      if pkg.verbose && reloaded != [], do: log_verbose("reloaded #{inspect(reloaded)}")
+      if pkg.verbose && !Enum.empty?(reloaded), do: log_verbose("reloaded #{inspect(reloaded)}")
     end
 
     # start any synced apps
-    if pkg.apps_to_start != [] do
+    if !Enum.empty?(pkg.apps_to_start) do
       {:ok, started} = Application.ensure_all_started(pkg.apps_to_start)
       if pkg.verbose, do: log_verbose("started #{inspect(started)}")
     end
@@ -274,13 +279,16 @@ defmodule FLAME.CodeSync do
       end
     end)
     |> then(fn {cons, reg} ->
-      # already in reverse order, which is what we want for prepend
+      # consolidated already in reverse order, which is what we want for prepend
       consolidated = Enum.uniq(cons)
       regular = reg |> Enum.uniq() |> Enum.reverse()
 
       if pkg.verbose do
-        log_verbose("prepending consolidated paths: #{inspect(consolidated)}")
-        log_verbose("appending code paths: #{inspect(regular)}")
+        if !Enum.empty?(consolidated),
+          do: log_verbose("prepending consolidated paths: #{inspect(consolidated)}")
+
+        if !Enum.empty?(regular),
+          do: log_verbose("appending code paths: #{inspect(regular)}")
       end
 
       Code.prepend_paths(consolidated, cache: true)
