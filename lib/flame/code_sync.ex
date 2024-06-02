@@ -256,7 +256,7 @@ defmodule FLAME.CodeSync do
 
   defp add_code_paths_from_tar(%PackagedStream{} = pkg, extract_dir) do
     pkg.changed_paths
-    |> Enum.map(fn rel_path ->
+    |> Enum.reduce({_consolidated = [], _regular = []}, fn rel_path, {cons, reg} ->
       dir = extract_dir |> Path.join(rel_path) |> Path.dirname()
 
       # todo filter only ebins
@@ -268,22 +268,25 @@ defmodule FLAME.CodeSync do
         if pkg.verbose, do: log_verbose("purging consolidated protocol #{inspect(mod)}")
         :code.purge(mod)
         :code.delete(mod)
+        {[dir | cons], reg}
+      else
+        _ -> {cons, [dir | reg]}
+      end
+    end)
+    |> then(fn {cons, reg} ->
+      # already in reverse order, which is what we want for prepend
+      consolidated = Enum.uniq(cons)
+      regular = reg |> Enum.uniq() |> Enum.reverse()
+
+      if pkg.verbose do
+        log_verbose("prepending consolidated paths: #{inspect(consolidated)}")
+        log_verbose("appending code paths: #{inspect(regular)}")
       end
 
-      dir
+      Code.prepend_paths(consolidated, cache: true)
+      Code.append_paths(regular, cache: true)
+      :ok
     end)
-    |> Enum.uniq()
-    |> then(fn uniq_paths ->
-      if pkg.verbose, do: log_verbose("adding code paths: #{inspect(uniq_paths)}")
-      uniq_paths
-    end)
-    |> Enum.reverse()
-    |> Code.prepend_paths(cache: true)
-    raise """
-    TODO when I return: after diff sync, the sync_beams end up at the top of the code path,
-    above consolidated protocols, which is wrong. Probably need special protocol consolidation
-    awareness here, or don't reverse on diff
-    """
   end
 
   defp log_verbose(msg) do
