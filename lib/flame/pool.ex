@@ -64,7 +64,8 @@ defmodule FLAME.Pool do
             on_grow_start: nil,
             on_grow_end: nil,
             on_shrink: nil,
-            async_boot_timer: nil
+            async_boot_timer: nil,
+            hotstart_threshold: 1
 
   def child_spec(opts) do
     %{
@@ -134,6 +135,10 @@ defmodule FLAME.Pool do
 
         * `:name` - The name of the pool
         * `:count` - The number of runners the pool is attempting to shrink to
+
+    * `:hotstart_threshold` - The percentage of pool utilisation before a new node is preemptively
+      added to the pool.
+      Should be a number 0 < n <= 1
   """
   def start_link(opts) do
     Keyword.validate!(opts, [
@@ -155,7 +160,8 @@ defmodule FLAME.Pool do
       :shutdown_timeout,
       :on_grow_start,
       :on_grow_end,
-      :on_shrink
+      :on_shrink,
+      :hotstart_threshold
     ])
 
     GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
@@ -336,7 +342,8 @@ defmodule FLAME.Pool do
       on_grow_start: opts[:on_grow_start],
       on_grow_end: opts[:on_grow_end],
       on_shrink: opts[:on_shrink],
-      runner_opts: runner_opts
+      runner_opts: runner_opts,
+      hotstart_threshold: Keyword.get(opts, :hotstart_threshold, 1)
     }
 
     {:ok, boot_runners(state)}
@@ -458,10 +465,13 @@ defmodule FLAME.Pool do
   defp checkout_runner(%Pool{} = state, deadline, from, monitor_ref \\ nil) do
     min_runner = min_runner(state)
     runner_count = runner_count(state)
+    threshold = state.max_concurrency * state.hotstart_threshold
 
     cond do
       runner_count == 0 || !min_runner ||
-          (min_runner.count == state.max_concurrency && runner_count < state.max) ->
+        (min_runner.count == state.max_concurrency && runner_count < state.max) ||
+          (threshold > 1 && min_runner.count > threshold) ->
+        # if the threshold is less than 1 you would get a recursive creation of new nodes
         if map_size(state.pending_runners) > 0 || state.async_boot_timer do
           waiting_in(state, deadline, from)
         else
