@@ -292,7 +292,7 @@ defmodule FLAME.CodeSync do
       end
 
       Code.prepend_paths(consolidated, cache: true)
-      Code.append_paths(regular, cache: true)
+      Code.prepend_paths(regular, cache: true)
       :ok
     end)
   end
