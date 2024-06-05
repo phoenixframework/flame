@@ -6,6 +6,7 @@ defmodule FLAME.CodeSync.PackagedStream do
             tmp_dir: nil,
             apps_to_start: [],
             changed_paths: [],
+            sync_beam_hashes: %{},
             deleted_paths: [],
             purge_modules: [],
             verbose: false
@@ -19,7 +20,7 @@ defmodule FLAME.CodeSync do
   alias FLAME.CodeSync.PackagedStream
 
   defstruct id: nil,
-            sync_beam_hashes: {},
+            sync_beam_hashes: %{},
             copy_paths: nil,
             sync_beams: nil,
             extract_dir: nil,
@@ -169,6 +170,7 @@ defmodule FLAME.CodeSync do
       id: code.id,
       tmp_dir: code.tmp_dir,
       extract_dir: code.extract_dir,
+      sync_beam_hashes: code.sync_beam_hashes,
       changed_paths: code.changed_paths,
       deleted_paths: code.deleted_paths,
       purge_modules: code.purge_modules,
@@ -261,10 +263,9 @@ defmodule FLAME.CodeSync do
 
   defp add_code_paths_from_tar(%PackagedStream{} = pkg, extract_dir) do
     pkg.changed_paths
-    |> Enum.reduce({_consolidated = [], _regular = []}, fn rel_path, {cons, reg} ->
+    |> Enum.reduce({_consolidated = [], _regular = [], _beams = []}, fn rel_path,
+                                                                        {cons, reg, beams} ->
       dir = extract_dir |> Path.join(rel_path) |> Path.dirname()
-
-      # todo filter only ebins
 
       # purge consolidated protocols
       with "consolidated" <- Path.basename(dir),
@@ -273,15 +274,20 @@ defmodule FLAME.CodeSync do
         if pkg.verbose, do: log_verbose("purging consolidated protocol #{inspect(mod)}")
         :code.purge(mod)
         :code.delete(mod)
-        {[dir | cons], reg}
+        {[dir | cons], reg, beams}
       else
-        _ -> {cons, [dir | reg]}
+        _ ->
+          case pkg.sync_beam_hashes do
+            %{^rel_path => _} -> {cons, reg, [dir | beams]}
+            %{} -> {cons, [dir | reg], beams}
+          end
       end
     end)
-    |> then(fn {cons, reg} ->
+    |> then(fn {cons, reg, beams} ->
       # consolidated already in reverse order, which is what we want for prepend
       consolidated = Enum.uniq(cons)
-      regular = reg |> Enum.uniq() |> Enum.reverse()
+      regular = Enum.uniq(reg)
+      sync_beams = Enum.uniq(beams)
 
       if pkg.verbose do
         if !Enum.empty?(consolidated),
@@ -291,8 +297,10 @@ defmodule FLAME.CodeSync do
           do: log_verbose("appending code paths: #{inspect(regular)}")
       end
 
-      Code.prepend_paths(consolidated, cache: true)
       Code.prepend_paths(regular, cache: true)
+      Code.prepend_paths(consolidated, cache: true)
+      # don't cache for sync_beams
+      Code.prepend_paths(sync_beams)
       :ok
     end)
   end
