@@ -147,7 +147,8 @@ defmodule FLAME.Terminator do
           parent: parent,
           calls: %{},
           log: log,
-          failsafe_timer: failsafe_timer
+          failsafe_timer: failsafe_timer,
+          idle_shutdown_timer: {nil, nil}
         }
 
         log(state, "starting with parent #{inspect(parent)}")
@@ -216,8 +217,9 @@ defmodule FLAME.Terminator do
     {:noreply, new_state}
   end
 
-  def handle_info(:idle_shutdown, %Terminator{parent: parent} = state) do
-    if state.idle_shutdown_check.() do
+  def handle_info({:idle_shutdown, timer_ref}, %Terminator{parent: parent} = state) do
+    {_current_timer, current_timer_ref} = state.idle_shutdown_timer
+    if timer_ref == current_timer_ref && state.idle_shutdown_check.() do
       send_parent(parent, {:remote_shutdown, :idle})
       new_state = system_stop(state, "idle shutdown")
       {:noreply, new_state}
@@ -365,17 +367,19 @@ defmodule FLAME.Terminator do
 
     case state.idle_shutdown_after do
       time when time in [nil, :infinity] ->
-        %Terminator{state | idle_shutdown_timer: nil}
+        %Terminator{state | idle_shutdown_timer: {nil, make_ref()}}
 
       time when is_integer(time) ->
-        timer = Process.send_after(self(), :idle_shutdown, time)
-        %Terminator{state | idle_shutdown_timer: timer}
+        timer_ref = make_ref()
+        timer = Process.send_after(self(), {:idle_shutdown, timer_ref}, time)
+        %Terminator{state | idle_shutdown_timer: {timer, timer_ref}}
     end
   end
 
   defp cancel_idle_shutdown(%Terminator{} = state) do
-    if state.idle_shutdown_timer, do: Process.cancel_timer(state.idle_shutdown_timer)
-    %Terminator{state | idle_shutdown_timer: nil}
+    {timer, _ref} = state.idle_shutdown_timer
+    if timer, do: Process.cancel_timer(timer)
+    %Terminator{state | idle_shutdown_timer: {nil, make_ref()}}
   end
 
   defp connect(%Terminator{parent: %Parent{} = parent} = state) do
