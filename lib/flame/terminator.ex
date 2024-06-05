@@ -219,6 +219,7 @@ defmodule FLAME.Terminator do
 
   def handle_info({:idle_shutdown, timer_ref}, %Terminator{parent: parent} = state) do
     {_current_timer, current_timer_ref} = state.idle_shutdown_timer
+
     if timer_ref == current_timer_ref && state.idle_shutdown_check.() do
       send_parent(parent, {:remote_shutdown, :idle})
       new_state = system_stop(state, "idle shutdown")
