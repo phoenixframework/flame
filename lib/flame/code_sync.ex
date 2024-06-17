@@ -232,8 +232,8 @@ defmodule FLAME.CodeSync do
     :ok
   end
 
-  def rm_packaged_stream!(%PackagedStream{} = pkg) do
-    if pkg.stream, do: File.rm!(pkg.stream.path)
+  def rm_packaged_stream(%PackagedStream{} = pkg) do
+    if pkg.stream, do: File.rm(pkg.stream.path)
     :ok
   end
 
