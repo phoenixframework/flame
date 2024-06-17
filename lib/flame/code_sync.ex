@@ -195,7 +195,7 @@ defmodule FLAME.CodeSync do
       # add code paths
       :ok = add_code_paths_from_tar(pkg, extract_dir)
 
-      File.rm!(target_tmp_path)
+      File.rm(target_tmp_path)
 
       # purge any deleted modules
       for mod <- pkg.purge_modules do
@@ -208,12 +208,12 @@ defmodule FLAME.CodeSync do
 
       # delete any deleted code paths, and prune empty dirs
       for del_path <- pkg.deleted_paths do
-        File.rm!(del_path)
+        File.rm(del_path)
         ebin_dir = Path.dirname(del_path)
 
         if File.ls!(ebin_dir) == [] do
           if pkg.verbose, do: log_verbose("deleting path #{ebin_dir}")
-          File.rm_rf!(ebin_dir)
+          File.rm_rf(ebin_dir)
           :code.del_path(String.to_charlist(ebin_dir))
         end
       end
