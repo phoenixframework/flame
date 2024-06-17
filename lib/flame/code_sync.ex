@@ -282,10 +282,10 @@ defmodule FLAME.CodeSync do
           {[dir | cons], reg, beams, new_reload, new_seen}
 
         pkg.sync_beam_hashes[rel_path] ->
-          {cons, reg, [dir | beams], new_reload, new_seen}
+          {cons, reg, [dir | beams], reload, new_seen}
 
         true ->
-          {cons, [dir | reg], beams, new_reload, new_seen}
+          {cons, [dir | reg], beams, reload, new_seen}
       end
     end)
     |> then(fn {consolidated, regular, sync_beams, reload, _seen} ->
