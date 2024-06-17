@@ -217,10 +217,6 @@ defmodule FLAME.CodeSync do
           :code.del_path(String.to_charlist(ebin_dir))
         end
       end
-
-      # reload any changed code
-      reloaded = :c.lm()
-      if pkg.verbose && !Enum.empty?(reloaded), do: log_verbose("reloaded #{inspect(reloaded)}")
     end
 
     # start any synced apps
@@ -259,39 +255,52 @@ defmodule FLAME.CodeSync do
   end
 
   defp add_code_paths_from_tar(%PackagedStream{} = pkg, extract_dir) do
-    pkg.changed_paths
-    |> Enum.reduce({_consolidated = [], _regular = [], _beams = []}, fn rel_path,
-                                                                        {cons, reg, beams} ->
+    init = {_consolidated = [], _regular = [], _beams = [], _seen = MapSet.new()}
+
+    Enum.reduce(pkg.changed_paths, init, fn rel_path, {cons, reg, beams, seen} ->
+      new_seen = MapSet.put(seen, rel_path)
       dir = extract_dir |> Path.join(rel_path) |> Path.dirname()
 
-      # purge consolidated protocols
-      with "consolidated" <- Path.basename(dir),
-           [mod_str, ""] <- rel_path |> Path.basename() |> String.split(".beam") do
-        mod = Module.concat([mod_str])
-        if pkg.verbose, do: log_verbose("purging consolidated protocol #{inspect(mod)}")
-        :code.purge(mod)
-        :code.delete(mod)
-        {[dir | cons], reg, beams}
-      else
-        _ ->
-          case pkg.sync_beam_hashes do
-            %{^rel_path => _} -> {cons, reg, [dir | beams]}
-            %{} -> {cons, [dir | reg], beams}
-          end
+      mod =
+        case rel_path |> Path.basename() |> String.split(".beam") do
+          [mod_str, ""] ->
+            mod = Module.concat([mod_str])
+            :code.purge(mod)
+            :code.delete(mod)
+            :code.load_file(mod)
+            mod
+
+          _ ->
+            nil
+        end
+
+      cond do
+        # purge consolidated protocols
+        MapSet.member?(seen, rel_path) ->
+          {cons, reg, beams, seen}
+
+        Path.basename(dir) == "consolidated" ->
+          if pkg.verbose, do: log_verbose("purging consolidated protocol #{inspect(mod)}")
+          {[dir | cons], reg, beams, new_seen}
+
+        pkg.sync_beam_hashes[rel_path] ->
+          {cons, reg, [dir | beams], new_seen}
+
+        true ->
+          {cons, [dir | reg], beams, new_seen}
       end
     end)
-    |> then(fn {cons, reg, beams} ->
-      # consolidated already in reverse order, which is what we want for prepend
-      consolidated = Enum.uniq(cons)
-      regular = Enum.uniq(reg)
-      sync_beams = Enum.uniq(beams)
-
+    |> then(fn {consolidated, regular, sync_beams, _seen} ->
+      # paths already in reverse order, which is what we want for prepend
       if pkg.verbose do
         if !Enum.empty?(consolidated),
           do: log_verbose("prepending consolidated paths: #{inspect(consolidated)}")
 
         if !Enum.empty?(regular),
           do: log_verbose("appending code paths: #{inspect(regular)}")
+
+        if !Enum.empty?(sync_beams),
+          do: log_verbose("reloading code paths: #{inspect(sync_beams)}")
       end
 
       Code.prepend_paths(regular, cache: true)
