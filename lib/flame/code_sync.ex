@@ -55,9 +55,9 @@ defmodule FLAME.CodeSync do
 
           reject_apps =
             for app <- [:flame, :eex, :elixir, :ex_unit, :iex, :logger, :mix],
-                ebin = :code.lib_dir(app, :ebin),
-                is_list(ebin),
-                do: ebin
+                lib_dir = :code.lib_dir(app),
+                is_list(lib_dir),
+                do: :filename.join(lib_dir, ~c"ebin")
 
           :code.get_path()
           |> Kernel.--([~c"." | reject_apps])
