@@ -43,14 +43,14 @@ defmodule FLAME.CodeSync do
     ])
 
     copy_paths =
-      case Keyword.fetch(opts, :copy_paths) do
-        val when val in [{:ok, false}, :error] ->
-          []
-
-        {:ok, paths} when is_list(paths) ->
+      case Keyword.get(opts, :copy_paths, false) do
+        paths when is_list(paths) ->
           paths
 
-        {:ok, true} ->
+        false ->
+          []
+
+        true ->
           otp_lib = :code.lib_dir()
 
           reject_apps =
