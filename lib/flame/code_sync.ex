@@ -275,6 +275,8 @@ defmodule FLAME.CodeSync do
 
       cond do
         # purge consolidated protocols
+        # we only need to track new reloads for protocols as other module
+        # references will reload on demand
         MapSet.member?(seen, rel_path) ->
           {cons, reg, beams, new_reload, seen}
 
@@ -282,10 +284,10 @@ defmodule FLAME.CodeSync do
           {[dir | cons], reg, beams, new_reload, new_seen}
 
         pkg.sync_beam_hashes[rel_path] ->
-          {cons, reg, [dir | beams], new_reload, new_seen}
+          {cons, reg, [dir | beams], reload, new_seen}
 
         true ->
-          {cons, [dir | reg], beams, new_reload, new_seen}
+          {cons, [dir | reg], beams, reload, new_seen}
       end
     end)
     |> then(fn {consolidated, regular, sync_beams, reload, _seen} ->
