@@ -264,7 +264,7 @@ defmodule FLAME.Runner do
             :ok = CodeSync.extract_packaged_stream(parent_pkg)
           end)
 
-          CodeSync.rm_packaged_stream!(parent_pkg)
+          CodeSync.rm_packaged_stream(parent_pkg)
 
           new_state
       end
@@ -315,7 +315,7 @@ defmodule FLAME.Runner do
                   end
                 end)
 
-              if parent_stream, do: CodeSync.rm_packaged_stream!(parent_stream)
+              if parent_stream, do: CodeSync.rm_packaged_stream(parent_stream)
 
               {:reply, :ok, new_state}
 
