@@ -275,6 +275,8 @@ defmodule FLAME.CodeSync do
 
       cond do
         # purge consolidated protocols
+        # we only need to track new reloads for protocols as other module
+        # references will reload on demand
         MapSet.member?(seen, rel_path) ->
           {cons, reg, beams, new_reload, seen}
 
