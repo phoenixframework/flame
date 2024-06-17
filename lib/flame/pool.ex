@@ -134,6 +134,53 @@ defmodule FLAME.Pool do
 
         * `:name` - The name of the pool
         * `:count` - The number of runners the pool is attempting to shrink to
+
+    * `:code_sync` – The optional list of options to enable copying and syncing code paths
+      from the parent node to the runner node. Disabled by default. The options are:
+
+      * `:copy_paths` – If `true`, the pool will copy the code paths from the parent node
+        to the runner node on boot. Then any subsequent FLAME operation will sync code paths
+        from parent to child. Useful when you are starting an image that needs to run
+        dynamic code that is not available on the runner node. Defaults to `false`.
+
+      * `:sync_beams` – A list of specific beam code paths to sync to the runner node. Useful
+        when you want to sync specific beam code paths from the parent after sending all code
+        paths from `:copy_paths` on initial boot. For example, with `copy_paths: true`,
+        and `sync_beams: ["/home/app/.cache/.../ebin"]`, all the code from the parent will be
+        copied on boot, but only the specific beam files will be synced on subsequent calls.
+        With `copy_paths: false`, and `sync_beams: ["/home/app/.cache/.../ebin"]`,
+        only the specific beam files will be synced on boot and for subsequent calls.
+        Defaults to `[]`.
+
+      * `:start_apps` – Either a boolean or a list of specific OTP applications names to start
+        when the runner boots. When `true`, all applications currently running on the parent node
+        are sent to the runner node to be started. Defaults to `false`.
+
+      * `:verbose` – If `true`, the pool will log verbose information about the code sync process.
+        Defaults to `false`.
+
+      For example, in [Livebook](https://livebook.dev/), to start a pool with code sync enabled:
+
+          Mix.install([:kino, :flame])
+
+          Kino.start_child!(
+            {FLAME.Pool,
+              name: :my_flame,
+              code_sync: [
+                start_apps: true,
+                copy_paths: true,
+                sync_beams: [Path.join(System.tmp_dir!(), "livebook_runtime")]
+              ],
+              min: 1,
+              max: 1,
+              max_concurrency: 10,
+              backend: {FLAME.FlyBackend,
+                cpu_kind: "performance", cpus: 4, memory_mb: 8192,
+                token: System.fetch_env!("FLY_API_TOKEN"),
+                env: Map.take(System.get_env(), ["LIVEBOOK_COOKIE"]),
+              },
+              idle_shutdown_after: :timer.minutes(5)}
+          )
   """
   def start_link(opts) do
     Keyword.validate!(opts, [
@@ -155,8 +202,11 @@ defmodule FLAME.Pool do
       :shutdown_timeout,
       :on_grow_start,
       :on_grow_end,
-      :on_shrink
+      :on_shrink,
+      :code_sync
     ])
+
+    Keyword.validate!(opts[:code_sync] || [], [:copy_paths, :sync_beams, :start_apps, :verbose])
 
     GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
   end
@@ -355,7 +405,8 @@ defmodule FLAME.Pool do
           :timeout,
           :boot_timeout,
           :shutdown_timeout,
-          :idle_shutdown_after
+          :idle_shutdown_after,
+          :code_sync
         ]
       )
 

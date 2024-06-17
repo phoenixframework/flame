@@ -4,6 +4,7 @@ defmodule FLAME.RunnerTest do
   import Mox
 
   alias FLAME.{Runner, MockBackend}
+  alias FLAME.Test.CodeSyncMock
 
   # Make sure mocks are verified when the test exits
   setup :set_mox_global
@@ -23,7 +24,7 @@ defmodule FLAME.RunnerTest do
   }
 
   defp remote_boot(state) do
-    parent = FLAME.Parent.new(make_ref(), self(), MockBackend, "MY_HOST_IP")
+    parent = FLAME.Parent.new(make_ref(), self(), MockBackend, "app-flame-1", "MY_HOST_IP")
     name = Module.concat(FLAME.TerminatorTest, to_string(System.unique_integer([:positive])))
     opts = [name: name, parent: parent]
     spec = Supervisor.child_spec({FLAME.Terminator, opts}, restart: :temporary)
@@ -249,6 +250,34 @@ defmodule FLAME.RunnerTest do
       Agent.update(agent, fn _ -> true end)
       assert_receive :stopped, timeout * 2
       assert_receive {:DOWN, _ref, :process, ^runner, _}
+    end
+  end
+
+  describe "code_sync" do
+    test "copy_paths: true, copies the code paths and extracts on boot" do
+      mock = CodeSyncMock.new()
+      # the 4th invocation is the rpc to diff code paths
+      {:ok, runner} = mock_successful_runner(4, code_sync: mock.opts)
+
+      Process.monitor(runner)
+      assert Runner.remote_boot(runner) == :ok
+      assert Runner.call(runner, self(), fn -> :works end, timeout: 1234) == :works
+      assert Runner.shutdown(runner) == :ok
+      # called on remote boot
+      assert_receive {CodeSyncMock, {_mock, :extract}}
+
+      # called on :works call
+      assert_receive {CodeSyncMock, {_mock, :extract}}
+    end
+
+    test "noops by default" do
+      {:ok, runner} = mock_successful_runner(3)
+
+      Process.monitor(runner)
+      assert Runner.remote_boot(runner) == :ok
+      assert Runner.call(runner, self(), fn -> :works end, timeout: 1234) == :works
+      assert Runner.shutdown(runner) == :ok
+      refute_receive {CodeSyncMock, _}
     end
   end
 end

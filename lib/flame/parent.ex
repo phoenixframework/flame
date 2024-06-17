@@ -14,6 +14,9 @@ defmodule FLAME.Parent do
     * `:flame_vsn` - The FLAME version running on the parent.
     * `:backend_app` - The FLAME backend application running on the parent.
     * `:backend_vsn` - The FLAME backend version running on the parent.
+    * `:node_base` - The node basename the parent generated for the runner.
+    * `:host_env` - The environment variable name on the runner to use to
+      to lookup the runner's hostname for the runner's longname.
   """
 
   @flame_vsn Keyword.fetch!(Mix.Project.config(), :version)
@@ -21,6 +24,7 @@ defmodule FLAME.Parent do
   defstruct pid: nil,
             ref: nil,
             backend: nil,
+            node_base: nil,
             flame_vsn: nil,
             backend_vsn: nil,
             backend_app: nil,
@@ -38,9 +42,9 @@ defmodule FLAME.Parent do
   """
   def get do
     with {:ok, encoded} <- System.fetch_env("FLAME_PARENT"),
-         %{ref: ref, pid: pid, backend: backend, host_env: host_env} <-
+         %{ref: ref, pid: pid, backend: backend, host_env: host_env, node_base: node_base} =
            encoded |> Base.decode64!() |> :erlang.binary_to_term() do
-      new(ref, pid, backend, host_env)
+      new(ref, pid, backend, node_base, host_env)
     else
       _ -> nil
     end
@@ -52,7 +56,7 @@ defmodule FLAME.Parent do
   The `pid` is the parent node's `FLAME.Runner` process started by
   the `FLAME.Pool`.
   """
-  def new(ref, pid, backend, host_env)
+  def new(ref, pid, backend, node_base, host_env)
       when is_reference(ref) and is_pid(pid) and is_atom(backend) do
     {backend_app, backend_vsn} =
       case :application.get_application(backend) do
@@ -64,6 +68,7 @@ defmodule FLAME.Parent do
       pid: pid,
       ref: ref,
       backend: backend,
+      node_base: node_base,
       host_env: host_env,
       flame_vsn: @flame_vsn,
       backend_app: backend_app,
@@ -78,7 +83,16 @@ defmodule FLAME.Parent do
     info =
       parent
       |> Map.from_struct()
-      |> Map.take([:ref, :pid, :backend, :flame_vsn, :backend_app, :backend_vsn, :host_env])
+      |> Map.take([
+        :ref,
+        :pid,
+        :backend,
+        :flame_vsn,
+        :backend_app,
+        :backend_vsn,
+        :node_base,
+        :host_env
+      ])
 
     info |> :erlang.term_to_binary() |> Base.encode64()
   end

@@ -22,7 +22,7 @@ defmodule FLAME.Runner do
   use GenServer
   require Logger
 
-  alias FLAME.{Runner, Terminator}
+  alias FLAME.{Runner, Terminator, CodeSync}
 
   @derive {Inspect,
            only: [
@@ -55,7 +55,9 @@ defmodule FLAME.Runner do
             boot_timeout: 10_000,
             shutdown_timeout: 5_000,
             idle_shutdown_after: nil,
-            idle_shutdown_check: nil
+            idle_shutdown_check: nil,
+            code_sync_opts: false,
+            code_sync: nil
 
   @doc """
   Starts a runner.
@@ -69,6 +71,7 @@ defmodule FLAME.Runner do
     `:boot_timeout` - The boot timeout of the runner
     `:shutdown_timeout` - The shutdown timeout
     `:idle_shutdown_after` - The idle shutdown time
+    `:code_sync` - The code sync options. See the `FLAME.Pool` module for more information.
   """
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts)
@@ -250,6 +253,22 @@ defmodule FLAME.Runner do
 
   def handle_call(:checkout, {from_pid, _tag}, state) do
     ref = Process.monitor(from_pid)
+
+    state =
+      case maybe_diff_code_paths(state) do
+        {new_state, nil} ->
+          new_state
+
+        {new_state, %CodeSync.PackagedStream{} = parent_pkg} ->
+          remote_call!(state.runner, state.backend_state, state.runner.boot_timeout, fn ->
+            :ok = CodeSync.extract_packaged_stream(parent_pkg)
+          end)
+
+          CodeSync.rm_packaged_stream(parent_pkg)
+
+          new_state
+      end
+
     {:reply, {ref, state.runner, state.backend_state}, put_checkout(state, from_pid, ref)}
   end
 
@@ -272,6 +291,7 @@ defmodule FLAME.Runner do
               Process.monitor(remote_terminator_pid)
               new_runner = %Runner{runner | terminator: remote_terminator_pid, status: :booted}
               new_state = %{state | runner: new_runner, backend_state: new_backend_state}
+              {new_state, parent_stream} = maybe_stream_code_paths(new_state)
 
               %Runner{
                 single_use: single_use,
@@ -287,7 +307,15 @@ defmodule FLAME.Runner do
 
                   :ok =
                     Terminator.schedule_idle_shutdown(term, idle_after, idle_check, single_use)
+
+                  if parent_stream do
+                    :ok = CodeSync.extract_packaged_stream(parent_stream)
+                  else
+                    :ok
+                  end
                 end)
+
+              if parent_stream, do: CodeSync.rm_packaged_stream(parent_stream)
 
               {:reply, :ok, new_state}
 
@@ -312,8 +340,18 @@ defmodule FLAME.Runner do
         :timeout,
         :boot_timeout,
         :shutdown_timeout,
-        :idle_shutdown_after
+        :idle_shutdown_after,
+        :code_sync
       ])
+
+    Keyword.validate!(opts[:code_sync] || [], [
+      :copy_paths,
+      :sync_beams,
+      :start_apps,
+      :tmp_dir,
+      :extract_dir,
+      :verbose
+    ])
 
     {idle_shutdown_after_ms, idle_check} =
       case Keyword.fetch(opts, :idle_shutdown_after) do
@@ -335,7 +373,8 @@ defmodule FLAME.Runner do
         shutdown_timeout: opts[:shutdown_timeout] || 30_000,
         idle_shutdown_after: idle_shutdown_after_ms,
         idle_shutdown_check: idle_check,
-        terminator: nil
+        terminator: nil,
+        code_sync_opts: Keyword.get(opts, :code_sync, false)
       }
 
     {backend, backend_init} =
@@ -427,6 +466,34 @@ defmodule FLAME.Runner do
             @drain_timeout -> exit(:timeout)
           end
         end)
+    end
+  end
+
+  defp maybe_stream_code_paths(%{runner: %Runner{} = runner} = state) do
+    if code_sync_opts = runner.code_sync_opts do
+      code_sync = CodeSync.new(code_sync_opts)
+      %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(code_sync)
+      new_runner = %Runner{runner | code_sync: code_sync}
+      {%{state | runner: new_runner}, parent_stream}
+    else
+      {state, nil}
+    end
+  end
+
+  defp maybe_diff_code_paths(%{runner: %Runner{} = runner} = state) do
+    if runner.code_sync do
+      diffed_code = CodeSync.diff(runner.code_sync)
+      new_runner = %Runner{runner | code_sync: diffed_code}
+      new_state = %{state | runner: new_runner}
+
+      if CodeSync.changed?(diffed_code) do
+        %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(diffed_code)
+        {new_state, parent_stream}
+      else
+        {new_state, nil}
+      end
+    else
+      {state, nil}
     end
   end
 end

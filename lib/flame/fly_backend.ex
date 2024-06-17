@@ -100,9 +100,9 @@ defmodule FLAME.FlyBackend do
              :runner_id,
              :local_ip,
              :remote_terminator_pid,
-             :runner_node_basename,
              :runner_instance_id,
              :runner_private_ip,
+             :runner_node_base,
              :runner_node_name,
              :boot_timeout
            ]}
@@ -124,9 +124,9 @@ defmodule FLAME.FlyBackend do
             runner_id: nil,
             remote_terminator_pid: nil,
             parent_ref: nil,
-            runner_node_basename: nil,
             runner_instance_id: nil,
             runner_private_ip: nil,
+            runner_node_base: nil,
             runner_node_name: nil,
             log: nil
 
@@ -152,7 +152,7 @@ defmodule FLAME.FlyBackend do
   @impl true
   def init(opts) do
     conf = Application.get_env(:flame, __MODULE__) || []
-    [node_base, ip] = node() |> to_string() |> String.split("@")
+    [_node_base, ip] = node() |> to_string() |> String.split("@")
 
     default = %FlyBackend{
       app: System.get_env("FLY_APP_NAME"),
@@ -164,7 +164,6 @@ defmodule FLAME.FlyBackend do
       cpus: System.schedulers_online(),
       memory_mb: 4096,
       boot_timeout: 30_000,
-      runner_node_basename: node_base,
       services: [],
       metadata: %{},
       init: %{},
@@ -176,7 +175,7 @@ defmodule FLAME.FlyBackend do
       |> Keyword.merge(opts)
       |> Keyword.validate!(@valid_opts)
 
-    state = Map.merge(default, Map.new(provided_opts))
+    %FlyBackend{} = state = Map.merge(default, Map.new(provided_opts))
 
     for key <- [:token, :image, :host, :app] do
       unless Map.get(state, key) do
@@ -184,18 +183,24 @@ defmodule FLAME.FlyBackend do
       end
     end
 
+    state = %FlyBackend{state | runner_node_base: "#{state.app}-flame-#{rand_id(20)}"}
     parent_ref = make_ref()
 
     encoded_parent =
       parent_ref
-      |> FLAME.Parent.new(self(), __MODULE__, "FLY_PRIVATE_IP")
+      |> FLAME.Parent.new(self(), __MODULE__, state.runner_node_base, "FLY_PRIVATE_IP")
       |> FLAME.Parent.encode()
 
     new_env =
-      Map.merge(
-        %{PHX_SERVER: "false", FLAME_PARENT: encoded_parent},
-        state.env
-      )
+      %{"PHX_SERVER" => "false", "FLAME_PARENT" => encoded_parent}
+      |> Map.merge(state.env)
+      |> then(fn env ->
+        if flags = System.get_env("ERL_AFLAGS") do
+          Map.put_new(env, "ERL_AFLAGS", flags)
+        else
+          env
+        end
+      end)
 
     new_state =
       %FlyBackend{state | env: new_env, parent_ref: parent_ref, local_ip: ip}
@@ -235,8 +240,6 @@ defmodule FLAME.FlyBackend do
   def remote_boot(%FlyBackend{parent_ref: parent_ref} = state) do
     {resp, req_connect_time} =
       with_elapsed_ms(fn ->
-        flame_node_base = "#{state.app}-flame-#{rand_id(20)}"
-
         http_post!("#{state.host}/v1/apps/#{state.app}/machines",
           content_type: "application/json",
           headers: [
@@ -246,7 +249,7 @@ defmodule FLAME.FlyBackend do
           connect_timeout: state.boot_timeout,
           body:
             Jason.encode!(%{
-              name: flame_node_base,
+              name: state.runner_node_base,
               region: state.region,
               config: %{
                 image: state.image,
@@ -259,7 +262,7 @@ defmodule FLAME.FlyBackend do
                 },
                 auto_destroy: true,
                 restart: %{policy: "no"},
-                env: Map.merge(state.env, %{"FLAME_NODE_BASE" => flame_node_base}),
+                env: state.env,
                 services: state.services,
                 metadata: Map.put(state.metadata, :flame_parent_ip, state.local_ip)
               }
@@ -312,9 +315,8 @@ defmodule FLAME.FlyBackend do
   defp rand_id(len) do
     len
     |> :crypto.strong_rand_bytes()
-    |> Base.encode64(padding: false)
+    |> Base.encode16(case: :lower)
     |> binary_part(0, len)
-    |> String.replace(~r/[^a-zA-Z0-9]/, "")
   end
 
   defp http_post!(url, opts) do
