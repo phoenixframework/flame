@@ -87,8 +87,8 @@ defmodule FLAME.FlyBackendTest do
              pid: _,
              ref: _,
              backend: FLAME.FlyBackend,
-             flame_vsn: "0.1.12",
-             backend_vsn: "0.1.12",
+             flame_vsn: vsn,
+             backend_vsn: vsn,
              backend_app: :flame
            } =
              FLAME.Parent.new(
