@@ -255,42 +255,40 @@ defmodule FLAME.CodeSync do
   end
 
   defp add_code_paths_from_tar(%PackagedStream{} = pkg, extract_dir) do
-    init = {_consolidated = [], _regular = [], _beams = [], _seen = MapSet.new()}
+    init = {_consolidated = [], _regular = [], _beams = [], _reload = [], _seen = MapSet.new()}
 
-    Enum.reduce(pkg.changed_paths, init, fn rel_path, {cons, reg, beams, seen} ->
+    Enum.reduce(pkg.changed_paths, init, fn rel_path, {cons, reg, beams, reload, seen} ->
       new_seen = MapSet.put(seen, rel_path)
       dir = extract_dir |> Path.join(rel_path) |> Path.dirname()
 
-      mod =
+      new_reload =
         case rel_path |> Path.basename() |> String.split(".beam") do
           [mod_str, ""] ->
             mod = Module.concat([mod_str])
             :code.purge(mod)
             :code.delete(mod)
-            :code.load_file(mod)
-            mod
+            [mod | reload]
 
           _ ->
-            nil
+            reload
         end
 
       cond do
         # purge consolidated protocols
         MapSet.member?(seen, rel_path) ->
-          {cons, reg, beams, seen}
+          {cons, reg, beams, new_reload, seen}
 
         Path.basename(dir) == "consolidated" ->
-          if pkg.verbose, do: log_verbose("purging consolidated protocol #{inspect(mod)}")
-          {[dir | cons], reg, beams, new_seen}
+          {[dir | cons], reg, beams, new_reload, new_seen}
 
         pkg.sync_beam_hashes[rel_path] ->
-          {cons, reg, [dir | beams], new_seen}
+          {cons, reg, [dir | beams], new_reload, new_seen}
 
         true ->
-          {cons, [dir | reg], beams, new_seen}
+          {cons, [dir | reg], beams, new_reload, new_seen}
       end
     end)
-    |> then(fn {consolidated, regular, sync_beams, _seen} ->
+    |> then(fn {consolidated, regular, sync_beams, reload, _seen} ->
       # paths already in reverse order, which is what we want for prepend
       if pkg.verbose do
         if !Enum.empty?(consolidated),
@@ -307,6 +305,10 @@ defmodule FLAME.CodeSync do
       Code.prepend_paths(consolidated, cache: true)
       # don't cache for sync_beams
       Code.prepend_paths(sync_beams)
+
+      if pkg.verbose && !Enum.empty?(reload), do: log_verbose("reloading #{inspect(reload)}")
+      for mod <- reload, do: :code.load_file(mod)
+
       :ok
     end)
   end
