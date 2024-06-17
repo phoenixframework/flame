@@ -127,10 +127,7 @@ defmodule FLAME.CodeSync do
 
     module_to_purge =
       for path <- deleted_paths,
-          basename = Path.basename(path),
-          [mod | _] = String.split(basename, ".beam"),
-          mod != basename,
-          do: Module.concat([mod])
+          do: path |> Path.basename(".beam") |> String.to_atom()
 
     %CodeSync{
       current
