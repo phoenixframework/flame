@@ -201,12 +201,9 @@ defmodule FLAME do
 
   When the caller exits, the remote runner will be terminated.
   """
-  def call(pool, func, opts) when is_atom(pool) and is_function(func, 0) and is_list(opts) do
+  def call(pool, func, opts \\ [])
+      when is_atom(pool) and is_function(func, 0) and is_list(opts) do
     FLAME.Pool.call(pool, func, opts)
-  end
-
-  def call(pool, func) when is_atom(pool) and is_function(func, 0) do
-    FLAME.Pool.call(pool, func, [])
   end
 
   @doc """
