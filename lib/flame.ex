@@ -258,4 +258,51 @@ defmodule FLAME do
   def place_child(pool, child_spec, opts \\ []) when is_atom(pool) and is_list(opts) do
     FLAME.Pool.place_child(pool, child_spec, opts)
   end
+
+  @doc """
+  Callback invoked to recursively track resources
+  on a given node.
+
+  Sometimes we may want to allocate long lived resources
+  in a FLAME but, because FLAME nodes are temporary, the
+  node would terminate shortly after. The `:track_resources`
+  option tells `FLAME` to look for resources which implement
+  the `FLAME.Trackable` protocol. Those resources can then
+  spawn PIDs in the remote node and tell FLAME to track them.
+  Once all PIDs terminate, the FLAME node will terminate too.
+
+  The `data` is any data type, `acc` is a list of PIDs
+  (typicalling starts as an empty list), and the `node`
+  we have received the resources from. See `FLAME.Trackable`
+  for customization.
+  """
+  def track_resources(data, acc, node)
+
+  def track_resources(tuple, acc, node) when is_tuple(tuple) do
+    {list, acc} = tuple |> Tuple.to_list() |> track_resources(acc, node)
+    {List.to_tuple(list), acc}
+  end
+
+  def track_resources(list, acc, node) when is_list(list) do
+    Enum.map_reduce(list, acc, &track_resources(&1, &2, node))
+  end
+
+  def track_resources(%_{} = other, acc, node) do
+    FLAME.Trackable.track(other, acc, node)
+  end
+
+  def track_resources(%{} = map, acc, node) do
+    {pairs, acc} =
+      Enum.map_reduce(map, acc, fn {k, v}, acc ->
+        {k, acc} = track_resources(k, acc, node)
+        {v, acc} = track_resources(v, acc, node)
+        {{k, v}, acc}
+      end)
+
+    {Map.new(pairs), acc}
+  end
+
+  def track_resources(other, acc, _node) do
+    {other, acc}
+  end
 end

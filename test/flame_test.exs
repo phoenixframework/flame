@@ -442,4 +442,26 @@ defmodule FLAME.FLAMETest do
       assert_receive {:DOWN, _ref, :process, ^runner, _}, 1000
     end
   end
+
+  describe "resource tracking" do
+    @tag runner: [min: 0, max: 1]
+    test "local", %{test: test} do
+      name = :"#{test}_trackable"
+      ref = make_ref()
+      trackable = %MyTrackable{name: name, ref: ref}
+      non_trackable = URI.new!("/")
+
+      {[{map}], [pid]} =
+        FLAME.track_resources([{%{"yes" => trackable, "no" => non_trackable}}], [], node())
+
+      assert map_size(map) == 2
+      assert ^non_trackable = map["no"]
+      assert %MyTrackable{name: ^name, ref: ^ref, pid: ^pid} = map["yes"]
+      assert Process.whereis(name) == pid
+
+      monitor_ref = Process.monitor(pid)
+      send(pid, {ref, :stop})
+      assert_receive {:DOWN, ^monitor_ref, _, _, :normal}
+    end
+  end
 end
