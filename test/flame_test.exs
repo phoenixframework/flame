@@ -326,8 +326,8 @@ defmodule FLAME.FLAMETest do
     end
   end
 
-  @tag runner: [min: 0, max: 2, max_concurrency: 2, idle_shutdown_after: 100]
   describe "process placement" do
+    @tag runner: [min: 0, max: 2, max_concurrency: 2, idle_shutdown_after: 100]
     test "place_child/2", %{runner_sup: runner_sup} = config do
       assert [] = Supervisor.which_children(runner_sup)
       assert {:ok, pid} = FLAME.place_child(config.test, {Agent, fn -> 1 end})
