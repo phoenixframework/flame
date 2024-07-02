@@ -31,6 +31,7 @@ defmodule FLAME.Terminator do
             child_placement_sup: nil,
             single_use: false,
             calls: %{},
+            watchers: %{},
             log: false,
             status: nil,
             failsafe_timer: nil,
@@ -66,6 +67,10 @@ defmodule FLAME.Terminator do
   def start_link(opts) do
     Keyword.validate!(opts, [:name, :parent, :child_placement_sup, :failsafe_timeout, :log])
     GenServer.start_link(__MODULE__, opts, name: opts[:name])
+  end
+
+  def watch(terminator, pids) do
+    GenServer.call(terminator, {:watch, pids})
   end
 
   def deadline_me(terminator, timeout) do
@@ -185,13 +190,17 @@ defmodule FLAME.Terminator do
   end
 
   def handle_info({:DOWN, ref, :process, pid, reason}, %Terminator{} = state) do
-    if state.parent && state.parent.pid == pid do
-      new_state =
-        system_stop(state, "parent pid #{inspect(pid)} went away #{inspect(reason)}. Going down")
+    case state do
+      %{parent: %{pid: ^pid}} ->
+        message = "parent pid #{inspect(pid)} went away #{inspect(reason)}. Going down"
+        {:noreply, system_stop(state, message)}
 
-      {:noreply, new_state}
-    else
-      {:noreply, drop_caller(state, ref)}
+      %{watchers: %{^ref => _} = watchers} ->
+        state = %{state | watchers: Map.delete(watchers, ref)}
+        {:noreply, maybe_schedule_shutdown(state)}
+
+      %{} ->
+        {:noreply, drop_caller(state, ref)}
     end
   end
 
@@ -244,6 +253,14 @@ defmodule FLAME.Terminator do
       end)
 
     {:reply, {:ok, child_pid}, new_state}
+  end
+
+  def handle_call({:watch, pids}, _from, %Terminator{watchers: watchers} = state) do
+    watchers =
+      Enum.reduce(pids, watchers, fn pid, acc -> Map.put(acc, Process.monitor(pid), []) end)
+
+    state = %{state | watchers: watchers}
+    {:reply, :ok, cancel_idle_shutdown(state)}
   end
 
   def handle_call(:system_shutdown, _from, %Terminator{} = state) do
@@ -356,7 +373,11 @@ defmodule FLAME.Terminator do
         state
       end
 
-    if map_size(state.calls) == 0 do
+    maybe_schedule_shutdown(state)
+  end
+
+  defp maybe_schedule_shutdown(%{calls: calls, watchers: watchers} = state) do
+    if map_size(calls) == 0 and map_size(watchers) == 0 do
       schedule_idle_shutdown(state)
     else
       state

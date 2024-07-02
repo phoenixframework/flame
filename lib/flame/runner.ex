@@ -119,12 +119,13 @@ defmodule FLAME.Runner do
       when is_pid(runner_pid) and is_pid(caller_pid) and is_function(func) and is_list(opts) do
     link? = Keyword.get(opts, :link, true)
     timeout = opts[:timeout] || nil
+    track_resources? = Keyword.get(opts, :track_resources, false)
     {ref, %Runner{} = runner, backend_state} = checkout(runner_pid)
     %Runner{terminator: terminator} = runner
     call_timeout = timeout || runner.timeout
 
     result =
-      remote_call(runner, backend_state, call_timeout, fn ->
+      remote_call(runner, backend_state, call_timeout, track_resources?, fn ->
         if link?, do: Process.link(caller_pid)
         :ok = Terminator.deadline_me(terminator, call_timeout)
         if is_function(func, 1), do: func.(terminator), else: func.()
@@ -260,7 +261,7 @@ defmodule FLAME.Runner do
           new_state
 
         {new_state, %CodeSync.PackagedStream{} = parent_pkg} ->
-          remote_call!(state.runner, state.backend_state, state.runner.boot_timeout, fn ->
+          remote_call!(state.runner, state.backend_state, state.runner.boot_timeout, false, fn ->
             :ok = CodeSync.extract_packaged_stream(parent_pkg)
           end)
 
@@ -301,7 +302,7 @@ defmodule FLAME.Runner do
               } = new_runner
 
               :ok =
-                remote_call!(runner, new_backend_state, runner.boot_timeout, fn ->
+                remote_call!(runner, new_backend_state, runner.boot_timeout, false, fn ->
                   # ensure app is fully started if parent connects before up
                   if otp_app, do: {:ok, _} = Application.ensure_all_started(otp_app)
 
@@ -412,8 +413,8 @@ defmodule FLAME.Runner do
     %{state | checkouts: Map.delete(state.checkouts, ref)}
   end
 
-  defp remote_call!(%Runner{} = runner, backend_state, timeout, func) do
-    case remote_call(runner, backend_state, timeout, func) do
+  defp remote_call!(%Runner{} = runner, backend_state, timeout, track_resources?, func) do
+    case remote_call(runner, backend_state, timeout, track_resources?, func) do
       {:ok, value} -> value
       {:exit, reason} -> exit(reason)
       {:error, error} -> raise(error)
@@ -421,20 +422,48 @@ defmodule FLAME.Runner do
     end
   end
 
-  defp remote_call(%Runner{} = runner, backend_state, timeout, func) do
+  defp remote_call(%Runner{} = runner, backend_state, timeout, track_resources?, func) do
+    %{terminator: terminator} = runner
     parent_ref = make_ref()
     parent = self()
 
     {:ok, {remote_pid, remote_monitor_ref}} =
       runner.backend.remote_spawn_monitor(backend_state, fn ->
         # This runs on the remote node
-        send(parent, {parent_ref, func.()})
+        result = func.()
+        send(parent, {parent_ref, result})
+
+        if track_resources? do
+          monitor_ref = Process.monitor(parent)
+
+          receive do
+            {^parent_ref, [_ | _] = to_watch} ->
+              Terminator.watch(terminator, to_watch)
+              # Hold the result until here so they are not premature garbage collected
+              __MODULE__.identity(result)
+
+            {^parent_ref, []} ->
+              :ok
+
+            {:DOWN, ^monitor_ref, _, _, _} ->
+              :ok
+          end
+        end
+
+        :ok
       end)
 
     receive do
       {^parent_ref, result} ->
         Process.demonitor(remote_monitor_ref, [:flush])
-        {:ok, result}
+
+        if track_resources? do
+          {result, pids} = FLAME.track_resources(result, [], node(remote_pid))
+          send(remote_pid, {parent_ref, pids})
+          {:ok, result}
+        else
+          {:ok, result}
+        end
 
       {:DOWN, ^remote_monitor_ref, :process, ^remote_pid, reason} ->
         case reason do
@@ -449,6 +478,11 @@ defmodule FLAME.Runner do
         {:exit, :timeout}
     end
   end
+
+  @doc """
+  Used to avoid garbage collection of remote terms.
+  """
+  def identity(term), do: term
 
   @drain_timeout :drain_timeout
   defp drain_checkouts(state, timeout) do

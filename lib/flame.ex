@@ -187,6 +187,10 @@ defmodule FLAME do
       an error on the caller. The caller will need to try/catch the call if they wish
       to handle the error.
 
+    * `:track_resources` - When true, traverses the returned result looking for
+      resources that implement the `FLAME.Trackable` protocol and make sure the
+      FLAME node does not terminate until the tracked resources are removed.
+
   ## Examples
 
     def my_expensive_thing(arg) do

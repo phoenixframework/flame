@@ -445,8 +445,8 @@ defmodule FLAME.FLAMETest do
 
   describe "resource tracking" do
     @tag runner: [min: 0, max: 1]
-    test "local", %{test: test} do
-      name = :"#{test}_trackable"
+    test "local", config do
+      name = :"#{config.test}_trackable"
       ref = make_ref()
       trackable = %MyTrackable{name: name, ref: ref}
       non_trackable = URI.new!("/")
@@ -462,6 +462,51 @@ defmodule FLAME.FLAMETest do
       monitor_ref = Process.monitor(pid)
       send(pid, {ref, :stop})
       assert_receive {:DOWN, ^monitor_ref, _, _, :normal}
+    end
+
+    @tag runner: [min: 0, max: 2, max_concurrency: 2, idle_shutdown_after: 100]
+    test "remote without tracking", config do
+      name = :"#{config.test}_trackable"
+      non_trackable = URI.new!("/")
+
+      [{map}] =
+        FLAME.call(config.test, fn ->
+          ref = make_ref()
+          trackable = %MyTrackable{name: name, ref: ref}
+          [{%{"yes" => trackable, "no" => non_trackable}}]
+        end)
+
+      assert map_size(map) == 2
+      assert ^non_trackable = map["no"]
+      assert %MyTrackable{pid: nil} = map["yes"]
+    end
+
+    @tag runner: [min: 0, max: 2, max_concurrency: 2, idle_shutdown_after: 100]
+    test "remote with tracking", config do
+      name = :"#{config.test}_trackable"
+      non_trackable = URI.new!("/")
+
+      [{map}] =
+        FLAME.call(
+          config.test,
+          fn ->
+            ref = make_ref()
+            trackable = %MyTrackable{name: name, ref: ref}
+            [{%{"yes" => trackable, "no" => non_trackable}}]
+          end,
+          track_resources: true
+        )
+
+      assert map_size(map) == 2
+      assert ^non_trackable = map["no"]
+      assert %MyTrackable{pid: pid} = trackable = map["yes"]
+      assert Process.alive?(pid)
+
+      # TODO:
+      # 1. Test that the runner/terminate are still alive
+      # 2. send(pid, {trackable.ref, :stop})
+      # 3. Observe the runner/terminator dying
+      # 4. Write a similar test to this, except track_resources: true is given on FLAME start
     end
   end
 end
