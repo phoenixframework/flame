@@ -67,7 +67,7 @@ defmodule FLAME.FlyBackend do
   config :flame, FLAME.FlyBackend,
     token: System.fetch_env!("FLY_API_TOKEN"),
     env: %{
-      "DATABASE_URL" => System.fetch_env!("DATABASE_URL")
+      "DATABASE_URL" => System.fetch_env!("DATABASE_URL"),
       "POOL_SIZE" => "1"
     }
   ```
