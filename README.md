@@ -33,3 +33,6 @@ Here we wrapped up our CPU expensive `ffmpeg` operation in a `FLAME.call/2`. FLA
   * `FLAME.place_child/3` – used for placing a child spec somewhere to run, in place of `DynamicSupervisor.start_child`, `Task.Supervisor.start_child`, etc
 
 The `FLAME.Pool` handles elastically scaling runners up and down, as well as remote monitoring of resources. Check the moduledoc for example usage.
+
+### NOTE:
+ - If you are using OTP version earlier than 27.0, you need to add [Jason](https://github.com/michalmuskala/jason) as dependency
