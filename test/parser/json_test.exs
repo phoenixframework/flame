@@ -23,6 +23,12 @@ defmodule FLAME.Parser.JSONTest do
     test "should encode list" do
       assert JSON.encode!([%{foo: "bar"}]) == "[{\"foo\":\"bar\"}]"
     end
+
+    test "should encode nullable values" do
+      assert JSON.encode!(%{foo: nil}) == "{\"foo\":null}"
+      assert JSON.encode!(%{"foo" => nil}) == "{\"foo\":null}"
+      assert JSON.encode!(nil) == "null"
+    end
   end
 
   describe "decode!/1" do
@@ -36,6 +42,11 @@ defmodule FLAME.Parser.JSONTest do
 
     test "should decode list" do
       assert JSON.decode!("[{\"foo\":\"bar\"}]") == [%{"foo" => "bar"}]
+    end
+
+    test "should decode nullable values" do
+      assert JSON.decode!("{\"foo\":null}") == %{"foo" => nil}
+      assert JSON.decode!("null") == nil
     end
   end
 
