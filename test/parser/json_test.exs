@@ -20,8 +20,14 @@ defmodule FLAME.Parser.JSONTest do
       assert JSON.encode!(%{foo: "bar"}) == "{\"foo\":\"bar\"}"
     end
 
+    test "should encode nested maps" do
+      assert JSON.encode!(%{foo: "bar", bar: %{baz: nil}}) ==
+               "{\"bar\":{\"baz\":null},\"foo\":\"bar\"}"
+    end
+
     test "should encode list" do
       assert JSON.encode!([%{foo: "bar"}]) == "[{\"foo\":\"bar\"}]"
+      assert JSON.encode!([%{foo: "bar"}, %{bar: nil}]) == "[{\"foo\":\"bar\"},{\"bar\":null}]"
     end
 
     test "should encode nullable values" do
@@ -40,8 +46,20 @@ defmodule FLAME.Parser.JSONTest do
       assert JSON.decode!("{\"foo\":\"bar\"}") == %{"foo" => "bar"}
     end
 
+    test "should decode nested maps" do
+      assert JSON.decode!("{\"bar\":{\"baz\":null},\"foo\":\"bar\"}") == %{
+               "foo" => "bar",
+               "bar" => %{"baz" => nil}
+             }
+    end
+
     test "should decode list" do
       assert JSON.decode!("[{\"foo\":\"bar\"}]") == [%{"foo" => "bar"}]
+
+      assert JSON.decode!("[{\"foo\":\"bar\"}, {\"bar\":null}]") == [
+               %{"foo" => "bar"},
+               %{"bar" => nil}
+             ]
     end
 
     test "should decode nullable values" do
