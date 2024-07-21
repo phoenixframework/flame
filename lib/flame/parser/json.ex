@@ -1,33 +1,24 @@
 defmodule FLAME.Parser.JSON do
   @moduledoc false
-
   if Code.ensure_loaded?(:json) do
     def encode!(data) do
       data
-      |> normalize_nullable()
-      |> :json.encode()
+      |> :json.encode(&encoder/2)
       |> IO.iodata_to_binary()
     end
 
     def decode!(data) do
       data
-      |> :json.decode()
-      |> normalize_nullable()
+      |> :json.decode(:ok, %{null: nil})
+      |> handle_decode()
     end
 
     def json_parser, do: :json
 
-    defp normalize_nullable(data) when is_map(data) do
-      for {key, value} <- data, into: %{}, do: {key, normalize_nullable(value)}
-    end
+    defp encoder(nil, _encoder), do: "null"
+    defp encoder(term, encoder), do: :json.encode_value(term, encoder)
 
-    defp normalize_nullable(data) when is_list(data) do
-      for value <- data, into: [], do: normalize_nullable(value)
-    end
-
-    defp normalize_nullable(:null), do: nil
-    defp normalize_nullable(nil), do: :null
-    defp normalize_nullable(data), do: data
+    defp handle_decode({data, :ok, ""}), do: data
   else
     def encode!(data), do: Jason.encode!(data)
     def decode!(data), do: Jason.decode!(data)
