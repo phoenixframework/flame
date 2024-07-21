@@ -22,7 +22,7 @@ defmodule FLAME.Parser.JSONTest do
 
     test "should encode nested maps" do
       assert JSON.encode!(%{foo: "bar", bar: %{baz: nil}}) ==
-               "{\"bar\":{\"baz\":null},\"foo\":\"bar\"}"
+               "{\"foo\":\"bar\",\"bar\":{\"baz\":null}}"
     end
 
     test "should encode list" do
