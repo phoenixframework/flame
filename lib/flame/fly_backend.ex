@@ -24,12 +24,14 @@ defmodule FLAME.FlyBackend do
 
   * `:cpu_kind` - The size of the runner CPU. Defaults to `"performance"`.
 
-  * `:gpu_kind` - The type of GPU reservation to make.
-
-  * `:cpus` - The number of runner CPUs. Defaults to  `System.schedulers_online()`
+  * `:cpus` - The number of runner CPUs. Defaults to `System.schedulers_online()`
     for the number of cores of the running parent app.
 
   * `:memory_mb` - The memory of the runner. Must be a 1024 multiple. Defaults to `4096`.
+
+  * `:gpu_kind` - The type of GPU reservation to make.
+
+  * `:gpus` - The number of runner GPUs. Defaults to `1` if `:gpu_kind` is set.
 
   * `:boot_timeout` - The boot timeout. Defaults to `30_000`.
 
@@ -93,8 +95,9 @@ defmodule FLAME.FlyBackend do
              :init,
              :cpu_kind,
              :cpus,
-             :gpu_kind,
              :memory_mb,
+             :gpu_kind,
+             :gpus,
              :image,
              :app,
              :runner_id,
@@ -115,6 +118,7 @@ defmodule FLAME.FlyBackend do
             cpus: nil,
             memory_mb: nil,
             gpu_kind: nil,
+            gpus: nil,
             image: nil,
             services: [],
             metadata: %{},
@@ -141,6 +145,7 @@ defmodule FLAME.FlyBackend do
     :cpus,
     :memory_mb,
     :gpu_kind,
+    :gpus,
     :boot_timeout,
     :env,
     :terminator_sup,
@@ -265,7 +270,8 @@ defmodule FLAME.FlyBackend do
                   cpu_kind: state.cpu_kind,
                   cpus: state.cpus,
                   memory_mb: state.memory_mb,
-                  gpu_kind: state.gpu_kind
+                  gpu_kind: state.gpu_kind,
+                  gpus: if(state.gpu_kind, do: state.gpus || 1)
                 },
                 auto_destroy: true,
                 restart: %{policy: "no"},
