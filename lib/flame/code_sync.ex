@@ -157,7 +157,7 @@ defmodule FLAME.CodeSync do
         out_path = Path.join([mfa(code.tmp_dir), "flame_parent_code_sync_#{code.id}.tar.gz"])
         dirs = for path <- code.changed_paths, uniq: true, do: String.to_charlist(path)
         {:ok, tar} = :erl_tar.open(out_path, [:write, :compressed])
-        for dir <- dirs, do: :erl_tar.add(tar, dir, trim_leading_slash(dir), verbose)
+        for dir <- dirs, do: :erl_tar.add(tar, dir, trim_leading_slash(dir), [:dereference | verbose])
         :ok = :erl_tar.close(tar)
 
         File.stream!(out_path, [], 2048)
