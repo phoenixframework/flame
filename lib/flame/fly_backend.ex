@@ -356,7 +356,9 @@ defmodule FLAME.FlyBackend do
       connect_timeout: connect_timeout
     ]
 
-    case :httpc.request(:post, {url, headers, ~c"#{content_type}", body}, http_opts, []) do
+    case :httpc.request(:post, {url, headers, ~c"#{content_type}", body}, http_opts,
+           body_format: :binary
+         ) do
       {:ok, {{_, 200, _}, _, response_body}} ->
         JSON.decode!(response_body)
 
