@@ -189,15 +189,16 @@ defmodule FLAME do
 
   ## Examples
 
-    def my_expensive_thing(arg) do
-      FLAME.call(MyApp.Runner, fn ->
-        # I'm now doing expensive work inside a new node
-        # pubsub and repo access all just work
-        Phoenix.PubSub.broadcast(MyApp.PubSub, "topic", result)
+      def my_expensive_thing(arg) do
+        FLAME.call(MyApp.Runner, fn ->
+          # I'm now doing expensive work inside a new node
+          # pubsub and repo access all just work
+          Phoenix.PubSub.broadcast(MyApp.PubSub, "topic", result)
 
-        # can return awaitable results back to caller
-        result
-      end)
+          # can return awaitable results back to caller
+          result
+        end)
+      end
 
   When the caller exits, the remote runner will be terminated.
   """
