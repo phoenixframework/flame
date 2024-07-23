@@ -86,6 +86,7 @@ defmodule FLAME.FlyBackend do
   @behaviour FLAME.Backend
 
   alias FLAME.FlyBackend
+  alias FLAME.Parser.JSON
 
   require Logger
 
@@ -260,7 +261,7 @@ defmodule FLAME.FlyBackend do
           ],
           connect_timeout: state.boot_timeout,
           body:
-            Jason.encode!(%{
+            JSON.encode!(%{
               name: state.runner_node_base,
               region: state.region,
               config: %{
@@ -357,7 +358,7 @@ defmodule FLAME.FlyBackend do
 
     case :httpc.request(:post, {url, headers, ~c"#{content_type}", body}, http_opts, []) do
       {:ok, {{_, 200, _}, _, response_body}} ->
-        Jason.decode!(response_body)
+        JSON.decode!(response_body)
 
       {:ok, {{_, status, reason}, _, resp_body}} ->
         raise "failed POST #{url} with #{inspect(status)} (#{inspect(reason)}): #{inspect(resp_body)} #{inspect(headers)}"
