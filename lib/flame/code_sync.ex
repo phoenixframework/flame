@@ -69,8 +69,8 @@ defmodule FLAME.CodeSync do
       id: System.unique_integer([:positive]),
       copy_paths: copy_paths,
       sync_beams: Keyword.get(opts, :sync_beams, []),
-      tmp_dir: Keyword.get(opts, :tmp_dir, &System.tmp_dir!/0),
-      extract_dir: Keyword.get(opts, :extract_dir, fn -> "/" end),
+      tmp_dir: Keyword.get(opts, :tmp_dir, {System, :tmp_dir!, []}),
+      extract_dir: Keyword.get(opts, :extract_dir, {Function, :identity, ["/"]}),
       start_apps: Keyword.get(opts, :start_apps, true),
       verbose: Keyword.get(opts, :verbose, false)
     })
@@ -154,7 +154,7 @@ defmodule FLAME.CodeSync do
 
     out_stream =
       if code.changed_paths != [] do
-        out_path = Path.join([code.tmp_dir.(), "flame_parent_code_sync_#{code.id}.tar.gz"])
+        out_path = Path.join([mfa(code.tmp_dir), "flame_parent_code_sync_#{code.id}.tar.gz"])
         dirs = for path <- code.changed_paths, uniq: true, do: String.to_charlist(path)
         {:ok, tar} = :erl_tar.open(out_path, [:write, :compressed])
         for dir <- dirs, do: :erl_tar.add(tar, dir, trim_leading_slash(dir), verbose)
@@ -183,8 +183,8 @@ defmodule FLAME.CodeSync do
   def extract_packaged_stream(%PackagedStream{} = pkg) do
     if pkg.stream do
       verbose = if pkg.verbose, do: [:verbose], else: []
-      extract_dir = pkg.extract_dir.()
-      target_tmp_path = Path.join([pkg.tmp_dir.(), "flame_child_code_sync_#{pkg.id}.tar.gz"])
+      extract_dir = mfa(pkg.extract_dir)
+      target_tmp_path = Path.join([mfa(pkg.tmp_dir), "flame_child_code_sync_#{pkg.id}.tar.gz"])
       flame_stream = File.stream!(target_tmp_path)
       # transfer the file
       Enum.into(pkg.stream, flame_stream)
@@ -318,4 +318,6 @@ defmodule FLAME.CodeSync do
   defp log_verbose(msg) do
     Logger.info("[CodeSync #{inspect(node())}] #{msg}")
   end
+
+  defp mfa({mod, func, args}), do: apply(mod, func, args)
 end

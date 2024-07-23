@@ -41,20 +41,22 @@ defmodule FLAME.Test.CodeSyncMock do
     default_opts = [
       copy_paths: Path.wildcard(Path.join(working_dir, "*/ebin")),
       sync_beams: [working_dir],
-      tmp_dir: fn -> tmp_dir end,
-      extract_dir: fn ->
-        send(test_pid, {CodeSyncMock, {id, :extract}})
-        extract_dir
-      end
+      tmp_dir: {Function, :identity, [tmp_dir]},
+      extract_dir: {__MODULE__, :extract_dir, [id, test_pid, extract_dir]}
     ]
 
     %CodeSyncMock{id: id, opts: Keyword.merge(default_opts, opts)}
   end
 
+  def extract_dir(id, test_pid, extract_dir) do
+    send(test_pid, {CodeSyncMock, {id, :extract}})
+    extract_dir
+  end
+
   def simulate_changes(%CodeSyncMock{id: id} = mock) do
     # mod1 is modified
-    mod1_dir = Path.join([mock.opts[:tmp_dir].(), "#{id}", "one", "ebin"])
-    mod2_dir = Path.join([mock.opts[:tmp_dir].(), "#{id}", "two", "ebin"])
+    mod1_dir = Path.join([mfa(mock.opts[:tmp_dir]), "#{id}", "one", "ebin"])
+    mod2_dir = Path.join([mfa(mock.opts[:tmp_dir]), "#{id}", "two", "ebin"])
 
     File.write!(
       Path.join(mod1_dir, "Elixir.FLAME.Test.CodeSyncMock.Mod1.beam"),
@@ -73,8 +75,10 @@ defmodule FLAME.Test.CodeSyncMock do
     :ok
   end
 
+  defp mfa({mod, func, args}), do: apply(mod, func, args)
+
   def extracted_rel_paths(%CodeSyncMock{} = mock) do
-    extracted_beams = Path.wildcard(Path.join(mock.opts[:extract_dir].(), "**/*.beam"))
+    extracted_beams = Path.wildcard(Path.join(mfa(mock.opts[:extract_dir]), "**/*.beam"))
 
     Enum.map(extracted_beams, fn path ->
       path
