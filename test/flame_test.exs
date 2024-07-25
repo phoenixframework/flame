@@ -482,7 +482,7 @@ defmodule FLAME.FLAMETest do
     end
 
     @tag runner: [min: 0, max: 2, max_concurrency: 2, idle_shutdown_after: 100]
-    test "remote with tracking", config do
+    test "remote with tracking", %{runner_sup: runner_sup} = config do
       name = :"#{config.test}_trackable"
       non_trackable = URI.new!("/")
 
@@ -497,16 +497,51 @@ defmodule FLAME.FLAMETest do
           track_resources: true
         )
 
+      assert [{:undefined, runner, :worker, [FLAME.Runner]}] =
+               Supervisor.which_children(runner_sup)
+
+      Process.monitor(runner)
       assert map_size(map) == 2
       assert ^non_trackable = map["no"]
       assert %MyTrackable{pid: pid} = trackable = map["yes"]
       assert Process.alive?(pid)
+      refute_receive {:DOWN, _, _, ^runner, _}, 1000
+      send(pid, {trackable.ref, :stop})
+      assert_receive {:DOWN, _, _, ^runner, {:shutdown, :idle}}, 1000
+    end
 
-      # TODO:
-      # 1. Test that the runner/terminate are still alive
-      # 2. send(pid, {trackable.ref, :stop})
-      # 3. Observe the runner/terminator dying
-      # 4. Write a similar test to this, except track_resources: true is given on FLAME start
+    @tag runner: [
+           min: 0,
+           max: 2,
+           max_concurrency: 2,
+           idle_shutdown_after: 100,
+           track_resources: true
+         ]
+    test "remote with tracking enabled at pool level", %{runner_sup: runner_sup} = config do
+      name = :"#{config.test}_trackable"
+      non_trackable = URI.new!("/")
+
+      [{map}] =
+        FLAME.call(
+          config.test,
+          fn ->
+            ref = make_ref()
+            trackable = %MyTrackable{name: name, ref: ref}
+            [{%{"yes" => trackable, "no" => non_trackable}}]
+          end
+        )
+
+      assert [{:undefined, runner, :worker, [FLAME.Runner]}] =
+               Supervisor.which_children(runner_sup)
+
+      Process.monitor(runner)
+      assert map_size(map) == 2
+      assert ^non_trackable = map["no"]
+      assert %MyTrackable{pid: pid} = trackable = map["yes"]
+      assert Process.alive?(pid)
+      refute_receive {:DOWN, _, _, ^runner, _}, 1000
+      send(pid, {trackable.ref, :stop})
+      assert_receive {:DOWN, _, _, ^runner, {:shutdown, :idle}}, 1000
     end
   end
 end
