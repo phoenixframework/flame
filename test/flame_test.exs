@@ -442,4 +442,106 @@ defmodule FLAME.FLAMETest do
       assert_receive {:DOWN, _ref, :process, ^runner, _}, 1000
     end
   end
+
+  describe "resource tracking" do
+    @tag runner: [min: 0, max: 1]
+    test "local", config do
+      name = :"#{config.test}_trackable"
+      ref = make_ref()
+      trackable = %MyTrackable{name: name, ref: ref}
+      non_trackable = URI.new!("/")
+
+      {[{map}], [pid]} =
+        FLAME.track_resources([{%{"yes" => trackable, "no" => non_trackable}}], [], node())
+
+      assert map_size(map) == 2
+      assert ^non_trackable = map["no"]
+      assert %MyTrackable{name: ^name, ref: ^ref, pid: ^pid} = map["yes"]
+      assert Process.whereis(name) == pid
+
+      monitor_ref = Process.monitor(pid)
+      send(pid, {ref, :stop})
+      assert_receive {:DOWN, ^monitor_ref, _, _, :normal}
+    end
+
+    @tag runner: [min: 0, max: 2, max_concurrency: 2, idle_shutdown_after: 100]
+    test "remote without tracking", config do
+      name = :"#{config.test}_trackable"
+      non_trackable = URI.new!("/")
+
+      [{map}] =
+        FLAME.call(config.test, fn ->
+          ref = make_ref()
+          trackable = %MyTrackable{name: name, ref: ref}
+          [{%{"yes" => trackable, "no" => non_trackable}}]
+        end)
+
+      assert map_size(map) == 2
+      assert ^non_trackable = map["no"]
+      assert %MyTrackable{pid: nil} = map["yes"]
+    end
+
+    @tag runner: [min: 0, max: 2, max_concurrency: 2, idle_shutdown_after: 100]
+    test "remote with tracking", %{runner_sup: runner_sup} = config do
+      name = :"#{config.test}_trackable"
+      non_trackable = URI.new!("/")
+
+      [{map}] =
+        FLAME.call(
+          config.test,
+          fn ->
+            ref = make_ref()
+            trackable = %MyTrackable{name: name, ref: ref}
+            [{%{"yes" => trackable, "no" => non_trackable}}]
+          end,
+          track_resources: true
+        )
+
+      assert [{:undefined, runner, :worker, [FLAME.Runner]}] =
+               Supervisor.which_children(runner_sup)
+
+      Process.monitor(runner)
+      assert map_size(map) == 2
+      assert ^non_trackable = map["no"]
+      assert %MyTrackable{pid: pid} = trackable = map["yes"]
+      assert Process.alive?(pid)
+      refute_receive {:DOWN, _, _, ^runner, _}, 1000
+      send(pid, {trackable.ref, :stop})
+      assert_receive {:DOWN, _, _, ^runner, {:shutdown, :idle}}, 1000
+    end
+
+    @tag runner: [
+           min: 0,
+           max: 2,
+           max_concurrency: 2,
+           idle_shutdown_after: 100,
+           track_resources: true
+         ]
+    test "remote with tracking enabled at pool level", %{runner_sup: runner_sup} = config do
+      name = :"#{config.test}_trackable"
+      non_trackable = URI.new!("/")
+
+      [{map}] =
+        FLAME.call(
+          config.test,
+          fn ->
+            ref = make_ref()
+            trackable = %MyTrackable{name: name, ref: ref}
+            [{%{"yes" => trackable, "no" => non_trackable}}]
+          end
+        )
+
+      assert [{:undefined, runner, :worker, [FLAME.Runner]}] =
+               Supervisor.which_children(runner_sup)
+
+      Process.monitor(runner)
+      assert map_size(map) == 2
+      assert ^non_trackable = map["no"]
+      assert %MyTrackable{pid: pid} = trackable = map["yes"]
+      assert Process.alive?(pid)
+      refute_receive {:DOWN, _, _, ^runner, _}, 1000
+      send(pid, {trackable.ref, :stop})
+      assert_receive {:DOWN, _, _, ^runner, {:shutdown, :idle}}, 1000
+    end
+  end
 end

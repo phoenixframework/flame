@@ -64,7 +64,8 @@ defmodule FLAME.Pool do
             on_grow_start: nil,
             on_grow_end: nil,
             on_shrink: nil,
-            async_boot_timer: nil
+            async_boot_timer: nil,
+            track_resources: false
 
   def child_spec(opts) do
     %{
@@ -135,6 +136,11 @@ defmodule FLAME.Pool do
         * `:name` - The name of the pool
         * `:count` - The number of runners the pool is attempting to shrink to
 
+    * `:track_resources` - When true, traverses the returned results from FLAME
+     operations looking for resources that implement the `FLAME.Trackable` protocol
+     and make sure the FLAME node does not terminate until the tracked resources are removed.
+     Defaults `false`.
+
     * `:code_sync` – The optional list of options to enable copying and syncing code paths
       from the parent node to the runner node. Disabled by default. The options are:
 
@@ -203,7 +209,8 @@ defmodule FLAME.Pool do
       :on_grow_start,
       :on_grow_end,
       :on_shrink,
-      :code_sync
+      :code_sync,
+      :track_resources
     ])
 
     Keyword.validate!(opts[:code_sync] || [], [:copy_paths, :sync_beams, :start_apps, :verbose])
@@ -222,8 +229,14 @@ defmodule FLAME.Pool do
   end
 
   defp do_call(name, func, caller_pid, opts) when is_pid(caller_pid) do
-    caller_checkout!(name, opts, :call, [name, func, opts], fn runner_pid, remaining_timeout ->
-      opts = Keyword.put_new(opts, :timeout, remaining_timeout)
+    caller_checkout!(name, opts, :call, [name, func, opts], fn runner_pid,
+                                                               remaining_timeout,
+                                                               track_resources ->
+      opts =
+        opts
+        |> Keyword.put_new(:timeout, remaining_timeout)
+        |> Keyword.put_new(:track_resources, track_resources)
+
       {:cancel, :ok, Runner.call(runner_pid, caller_pid, func, opts)}
     end)
   end
@@ -256,10 +269,12 @@ defmodule FLAME.Pool do
   """
   def place_child(name, child_spec, opts) do
     caller_checkout!(name, opts, :place_child, [name, child_spec, opts], fn runner_pid,
-                                                                            remaining_timeout ->
+                                                                            remaining_timeout,
+                                                                            track_resources ->
       place_opts =
         opts
         |> Keyword.put(:timeout, opts[:timeout] || remaining_timeout)
+        |> Keyword.put(:track_resources, track_resources)
         |> Keyword.put_new(:link, true)
 
       case Runner.place_child(runner_pid, child_spec, place_opts) do
@@ -281,7 +296,9 @@ defmodule FLAME.Pool do
   end
 
   defp caller_checkout!(name, opts, fun_name, args, func) do
-    timeout = opts[:timeout] || lookup_boot_timeout(name)
+    %{boot_timeout: boot_timeout, track_resources: track_resources} = lookup_meta(name)
+    timeout = opts[:timeout] || boot_timeout
+    track_resources = Keyword.get(opts, :track_resources, track_resources)
     pid = Process.whereis(name) || exit!(:noproc, fun_name, args)
     ref = Process.monitor(pid)
     {start_time, deadline} = deadline(timeout)
@@ -296,7 +313,7 @@ defmodule FLAME.Pool do
         try do
           Process.demonitor(ref, [:flush])
           remaining_timeout = remaining_timeout(opts, start_time)
-          func.(runner_pid, remaining_timeout)
+          func.(runner_pid, remaining_timeout, track_resources)
         catch
           kind, reason ->
             send_cancel(pid, ref, :catch)
@@ -346,18 +363,19 @@ defmodule FLAME.Pool do
     :ets.lookup_element(name, :meta, 2)
   end
 
-  defp lookup_boot_timeout(name) do
-    %{boot_timeout: timeout} = lookup_meta(name)
-    timeout
-  end
-
   @impl true
   def init(opts) do
     name = Keyword.fetch!(opts, :name)
     task_sup = Keyword.fetch!(opts, :task_sup)
     boot_timeout = Keyword.get(opts, :boot_timeout, @boot_timeout)
+    track_resources = Keyword.get(opts, :track_resources, false)
     :ets.new(name, [:set, :public, :named_table, read_concurrency: true])
-    :ets.insert(name, {:meta, %{boot_timeout: boot_timeout, task_sup: task_sup}})
+
+    :ets.insert(
+      name,
+      {:meta, %{boot_timeout: boot_timeout, task_sup: task_sup, track_resources: track_resources}}
+    )
+
     terminator_sup = Keyword.fetch!(opts, :terminator_sup)
     child_placement_sup = Keyword.fetch!(opts, :child_placement_sup)
     runner_opts = runner_opts(opts, terminator_sup)
@@ -386,6 +404,7 @@ defmodule FLAME.Pool do
       on_grow_start: opts[:on_grow_start],
       on_grow_end: opts[:on_grow_end],
       on_shrink: opts[:on_shrink],
+      track_resources: track_resources,
       runner_opts: runner_opts
     }
 
