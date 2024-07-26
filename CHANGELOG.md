@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 (2024-07-26)
+
+### Bug Fixes
+- Copy sym links in `:copy_paths` and `:sync_beams`
+- Fix function error caused by anonymous functions in `:copy_paths` and `:sync_beams`
+
+### Enhancements
+- Use OTP 27's `:json` if available
+
 ## 0.2.0 (2024-06-17)
 
 ### Backwards incompatible changes
