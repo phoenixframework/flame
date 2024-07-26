@@ -8,6 +8,9 @@
 
 ### Enhancements
 - Use OTP 27's `:json` if available
+- Introduce `FLAME.Trackable` protocol for tracking resources
+- Introduce `FLAME.track_resources/3` to recursively track resources
+  on a given node
 
 ## 0.2.0 (2024-06-17)
 
