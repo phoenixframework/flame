@@ -92,7 +92,7 @@ defmodule FLAME do
   your existing pool size.
 
   To accomplish these you can use `FLAME.Parent.get/0` to conditionally enable or
-  disable processes in you `application.ex` file:
+  disable processes in your `application.ex` file:
 
       def start(_type, _args) do
         flame_parent = FLAME.Parent.get()
