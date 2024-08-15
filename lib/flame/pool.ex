@@ -1,6 +1,7 @@
 defmodule FLAME.Pool.RunnerState do
   @moduledoc false
 
+  @type t :: %__MODULE__{}
   defstruct count: nil, pid: nil, monitor_ref: nil
 end
 
@@ -45,6 +46,7 @@ defmodule FLAME.Pool do
   @idle_shutdown_after 30_000
   @async_boot_debounce 1_000
 
+  @type t :: %__MODULE__{}
   defstruct name: nil,
             runner_sup: nil,
             task_sup: nil,
@@ -488,21 +490,12 @@ defmodule FLAME.Pool do
     {:noreply, checkout_runner(state, deadline, from)}
   end
 
-  defp runner_count(state) do
+  def runner_count(state) do
     map_size(state.runners) + map_size(state.pending_runners)
   end
 
-  defp waiting_count(%Pool{waiting: %Queue{} = waiting}) do
+  def waiting_count(%Pool{waiting: %Queue{} = waiting}) do
     Queue.size(waiting)
-  end
-
-  defp min_runner(state) do
-    if map_size(state.runners) == 0 do
-      nil
-    else
-      {_ref, min} = Enum.min_by(state.runners, fn {_, %RunnerState{count: count}} -> count end)
-      min
-    end
   end
 
   defp replace_caller(state, checkout_ref, caller_pid, child_pid) do
@@ -543,29 +536,23 @@ defmodule FLAME.Pool do
   end
 
   defp checkout_runner(%Pool{} = state, deadline, from, monitor_ref \\ nil) do
-    min_runner = min_runner(state)
-    runner_count = runner_count(state)
+    {strategy_module, strategy_opts} = state.strategy
 
-    cond do
-      min_runner && min_runner.count < state.max_concurrency ->
-        reply_runner_checkout(state, min_runner, from, monitor_ref)
-
-      runner_count < state.max ->
-        if state.async_boot_timer ||
-             map_size(state.pending_runners) * state.max_concurrency > waiting_count(state) do
-          waiting_in(state, deadline, from)
-        else
-          state
-          |> async_boot_runner()
-          |> waiting_in(deadline, from)
-        end
-
-      true ->
+    case strategy_module.checkout_runner(state, strategy_opts) do
+      :wait ->
         waiting_in(state, deadline, from)
+
+      :scale ->
+        state
+        |> async_boot_runner()
+        |> waiting_in(deadline, from)
+
+      {:checkout, runner} ->
+        reply_runner_checkout(state, runner, from, monitor_ref)
     end
   end
 
-  defp reply_runner_checkout(state, %RunnerState{} = runner, from, monitor_ref) do
+  def reply_runner_checkout(state, %RunnerState{} = runner, from, monitor_ref) do
     # we pass monitor_ref down from waiting so we don't need to remonitor if already monitoring
     {from_pid, checkout_ref} = from
 
@@ -629,17 +616,28 @@ defmodule FLAME.Pool do
   end
 
   defp async_boot_runner(%Pool{on_grow_start: on_grow_start, name: name} = state) do
-    new_count = runner_count(state) + 1
+    {strategy_module, strategy_opts} = state.strategy
+    current_count = runner_count(state)
+    new_count = strategy_module.desired_count(state, strategy_opts)
 
-    task =
-      Task.Supervisor.async_nolink(state.task_sup, fn ->
-        if on_grow_start, do: on_grow_start.(%{count: new_count, name: name, pid: self()})
+    num_tasks = max(new_count - current_count, 0)
 
-        start_child_runner(state)
-      end)
+    if num_tasks do
+      tasks =
+        for _ <- 1..num_tasks do
+          Task.Supervisor.async_nolink(state.task_sup, fn ->
+            if on_grow_start, do: on_grow_start.(%{count: new_count, name: name, pid: self()})
+            start_child_runner(state)
+          end)
+        end
 
-    new_pending = Map.put(state.pending_runners, task.ref, task.pid)
-    %Pool{state | pending_runners: new_pending}
+      pending_runners = Map.new(tasks, &{&1.ref, &1.pid})
+      new_pending = Map.merge(state.pending_runners, pending_runners)
+
+      %Pool{state | pending_runners: new_pending}
+    else
+      state
+    end
   end
 
   defp start_child_runner(%Pool{} = state, runner_opts \\ []) do
@@ -719,7 +717,7 @@ defmodule FLAME.Pool do
     %Pool{state | waiting: Queue.delete_by_key(state.waiting, caller_pid)}
   end
 
-  defp pop_next_waiting_caller(%Pool{} = state) do
+  def pop_next_waiting_caller(%Pool{} = state) do
     result =
       Queue.pop_until(state.waiting, fn _pid, %WaitingState{} = waiting ->
         %WaitingState{from: {pid, _}, monitor_ref: ref, deadline: deadline} = waiting
@@ -817,25 +815,8 @@ defmodule FLAME.Pool do
     {runner, new_state} = put_runner(new_state, pid)
     new_state = maybe_on_grow_end(new_state, task_pid, :ok)
 
-    # pop waiting callers up to max_concurrency, but we must handle:
-    # 1. the case where we have no waiting callers
-    # 2. the case where we process a DOWN for the new runner as we pop DOWNs
-    #   looking for fresh waiting
-    # 3. if we still have waiting callers at the end, boot more runners if we have capacity
-    Enum.reduce_while(1..state.max_concurrency, new_state, fn i, acc ->
-      with {:ok, %RunnerState{} = runner} <- Map.fetch(acc.runners, runner.monitor_ref),
-           true <- i <= acc.max_concurrency do
-        case pop_next_waiting_caller(acc) do
-          {%WaitingState{} = next, acc} ->
-            {:cont, reply_runner_checkout(acc, runner, next.from, next.monitor_ref)}
-
-          {nil, acc} ->
-            {:halt, acc}
-        end
-      else
-        _ -> {:halt, acc}
-      end
-    end)
+    {strategy_module, strategy_opts} = state.strategy
+    strategy_module.assign_waiting_callers(new_state, runner, strategy_opts)
   end
 
   defp deadline(timeout) when is_integer(timeout) do
