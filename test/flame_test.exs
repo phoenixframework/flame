@@ -28,7 +28,11 @@ defmodule FLAME.FLAMETest do
     {:ok, runner_sup: runner_sup, pool_pid: pool_pid}
   end
 
-  @tag runner: [min: 1, max: 2, max_concurrency: 2]
+  @tag runner: [
+         min: 1,
+         max: 2,
+         strategy: {Pool.PerRunnerMaxConcurrencyStrategy, max_concurrency: 2}
+       ]
   test "init boots min runners synchronously and grows on demand",
        %{runner_sup: runner_sup} = config do
     min_pool = Supervisor.which_children(runner_sup)
@@ -58,7 +62,11 @@ defmodule FLAME.FLAMETest do
     assert new_pool == Supervisor.which_children(runner_sup)
   end
 
-  @tag runner: [min: 0, max: 1, max_concurrency: 2]
+  @tag runner: [
+         min: 0,
+         max: 1,
+         strategy: {Pool.PerRunnerMaxConcurrencyStrategy, max_concurrency: 2}
+       ]
   test "concurrent calls on fully pending runners",
        %{runner_sup: runner_sup} = config do
     assert Supervisor.which_children(runner_sup) == []
@@ -97,7 +105,7 @@ defmodule FLAME.FLAMETest do
   @tag runner: [
          min: 1,
          max: 2,
-         max_concurrency: 1,
+         strategy: {Pool.PerRunnerMaxConcurrencyStrategy, max_concurrency: 1},
          on_grow_start: &__MODULE__.on_grow_start/1,
          on_grow_end: &__MODULE__.on_grow_end/2
        ]
@@ -139,7 +147,12 @@ defmodule FLAME.FLAMETest do
     end)
   end
 
-  @tag runner: [min: 1, max: 2, max_concurrency: 2, idle_shutdown_after: 500]
+  @tag runner: [
+         min: 1,
+         max: 2,
+         strategy: {Pool.PerRunnerMaxConcurrencyStrategy, max_concurrency: 2},
+         idle_shutdown_after: 500
+       ]
   test "idle shutdown", %{runner_sup: runner_sup} = config do
     sim_long_running(config.test, 100)
     sim_long_running(config.test, 100)
@@ -160,7 +173,12 @@ defmodule FLAME.FLAMETest do
              Supervisor.which_children(runner_sup)
   end
 
-  @tag runner: [min: 1, max: 1, max_concurrency: 2, idle_shutdown_after: 500]
+  @tag runner: [
+         min: 1,
+         max: 1,
+         strategy: {Pool.PerRunnerMaxConcurrencyStrategy, max_concurrency: 2},
+         idle_shutdown_after: 500
+       ]
   test "pool runner DOWN exits any active checkouts", %{runner_sup: runner_sup} = config do
     {:ok, active_checkout} = sim_long_running(config.test, 10_000)
     Process.unlink(active_checkout)
@@ -170,7 +188,12 @@ defmodule FLAME.FLAMETest do
     assert_receive {:DOWN, _ref, :process, ^active_checkout, :killed}
   end
 
-  @tag runner: [min: 0, max: 1, max_concurrency: 2, idle_shutdown_after: 50]
+  @tag runner: [
+         min: 0,
+         max: 1,
+         strategy: {Pool.PerRunnerMaxConcurrencyStrategy, max_concurrency: 2},
+         idle_shutdown_after: 50
+       ]
   test "call links", %{runner_sup: runner_sup} = config do
     ExUnit.CaptureLog.capture_log(fn ->
       parent = self()
@@ -226,7 +249,12 @@ defmodule FLAME.FLAMETest do
     end)
   end
 
-  @tag runner: [min: 0, max: 1, max_concurrency: 2, idle_shutdown_after: 50]
+  @tag runner: [
+         min: 0,
+         max: 1,
+         strategy: {Pool.PerRunnerMaxConcurrencyStrategy, max_concurrency: 2},
+         idle_shutdown_after: 50
+       ]
   test "cast with link false", %{runner_sup: runner_sup} = config do
     ExUnit.CaptureLog.capture_log(fn ->
       assert Supervisor.which_children(runner_sup) == []
@@ -252,7 +280,12 @@ defmodule FLAME.FLAMETest do
   end
 
   describe "cast" do
-    @tag runner: [min: 1, max: 2, max_concurrency: 2, idle_shutdown_after: 500]
+    @tag runner: [
+           min: 1,
+           max: 2,
+           strategy: {Pool.PerRunnerMaxConcurrencyStrategy, max_concurrency: 2},
+           idle_shutdown_after: 500
+         ]
     test "normal execution", %{} = config do
       sim_long_running(config.test, 100)
       parent = self()
@@ -278,7 +311,7 @@ defmodule FLAME.FLAMETest do
     @tag runner: [
            min: 0,
            max: 2,
-           max_concurrency: 1,
+           strategy: {Pool.PerRunnerMaxConcurrencyStrategy, max_concurrency: 1},
            on_grow_start: &__MODULE__.growth_grow_start/1
          ]
     test "pool growth", %{} = config do
@@ -303,7 +336,12 @@ defmodule FLAME.FLAMETest do
       refute_receive {:grow_start, _}, 1000
     end
 
-    @tag runner: [min: 1, max: 2, max_concurrency: 2, idle_shutdown_after: 500]
+    @tag runner: [
+           min: 1,
+           max: 2,
+           strategy: {Pool.PerRunnerMaxConcurrencyStrategy, max_concurrency: 2},
+           idle_shutdown_after: 500
+         ]
     test "with exit and default link", %{} = config do
       ExUnit.CaptureLog.capture_log(fn ->
         Process.flag(:trap_exit, true)
@@ -327,7 +365,12 @@ defmodule FLAME.FLAMETest do
   end
 
   describe "process placement" do
-    @tag runner: [min: 0, max: 2, max_concurrency: 2, idle_shutdown_after: 100]
+    @tag runner: [
+           min: 0,
+           max: 2,
+           strategy: {Pool.PerRunnerMaxConcurrencyStrategy, max_concurrency: 2},
+           idle_shutdown_after: 100
+         ]
     test "place_child/2", %{runner_sup: runner_sup} = config do
       assert [] = Supervisor.which_children(runner_sup)
       assert {:ok, pid} = FLAME.place_child(config.test, {Agent, fn -> 1 end})
@@ -355,7 +398,12 @@ defmodule FLAME.FLAMETest do
       assert_receive {:DOWN, _ref, :process, ^runner, _}, 1000
     end
 
-    @tag runner: [min: 0, max: 2, max_concurrency: 2, idle_shutdown_after: 100]
+    @tag runner: [
+           min: 0,
+           max: 2,
+           strategy: {Pool.PerRunnerMaxConcurrencyStrategy, max_concurrency: 2},
+           idle_shutdown_after: 100
+         ]
     test "place_child links", %{runner_sup: runner_sup} = config do
       # links by default
       Process.flag(:trap_exit, true)
@@ -389,7 +437,12 @@ defmodule FLAME.FLAMETest do
       assert_receive {:DOWN, _ref, :process, ^runner, _}, 1000
     end
 
-    @tag runner: [min: 0, max: 2, max_concurrency: 2, idle_shutdown_after: 100]
+    @tag runner: [
+           min: 0,
+           max: 2,
+           strategy: {Pool.PerRunnerMaxConcurrencyStrategy, max_concurrency: 2},
+           idle_shutdown_after: 100
+         ]
     test "place_child when caller exits", %{runner_sup: runner_sup} = config do
       # links by default
       parent = self()
@@ -464,7 +517,12 @@ defmodule FLAME.FLAMETest do
       assert_receive {:DOWN, ^monitor_ref, _, _, :normal}
     end
 
-    @tag runner: [min: 0, max: 2, max_concurrency: 2, idle_shutdown_after: 100]
+    @tag runner: [
+           min: 0,
+           max: 2,
+           strategy: {Pool.PerRunnerMaxConcurrencyStrategy, max_concurrency: 2},
+           idle_shutdown_after: 100
+         ]
     test "remote without tracking", config do
       name = :"#{config.test}_trackable"
       non_trackable = URI.new!("/")
@@ -481,7 +539,12 @@ defmodule FLAME.FLAMETest do
       assert %MyTrackable{pid: nil} = map["yes"]
     end
 
-    @tag runner: [min: 0, max: 2, max_concurrency: 2, idle_shutdown_after: 100]
+    @tag runner: [
+           min: 0,
+           max: 2,
+           strategy: {Pool.PerRunnerMaxConcurrencyStrategy, max_concurrency: 2},
+           idle_shutdown_after: 100
+         ]
     test "remote with tracking", %{runner_sup: runner_sup} = config do
       name = :"#{config.test}_trackable"
       non_trackable = URI.new!("/")
@@ -513,7 +576,7 @@ defmodule FLAME.FLAMETest do
     @tag runner: [
            min: 0,
            max: 2,
-           max_concurrency: 2,
+           strategy: {Pool.PerRunnerMaxConcurrencyStrategy, max_concurrency: 2},
            idle_shutdown_after: 100,
            track_resources: true
          ]
