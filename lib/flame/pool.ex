@@ -26,7 +26,7 @@ defmodule FLAME.Pool do
 
       children = [
         ...,
-        {FLAME.Pool, name: MyRunner, min: 1, max: 10, max_concurrency: 100}
+        {FLAME.Pool, name: MyRunner, min: 1, max: 10}
       ]
 
   See `start_link/1` for supported options.
@@ -40,7 +40,7 @@ defmodule FLAME.Pool do
   alias FLAME.{Pool, Runner, Queue, CodeSync}
   alias FLAME.Pool.{RunnerState, WaitingState, Caller}
 
-  @default_max_concurrency 100
+  @default_strategy {Pool.PerRunnerMaxConcurrencyStrategy, [max_concurrency: 100]}
   @boot_timeout 30_000
   @idle_shutdown_after 30_000
   @async_boot_debounce 1_000
@@ -55,7 +55,7 @@ defmodule FLAME.Pool do
             min_idle_shutdown_after: nil,
             min: nil,
             max: nil,
-            max_concurrency: nil,
+            strategy: nil,
             callers: %{},
             waiting: Queue.new(),
             runners: %{},
@@ -89,8 +89,7 @@ defmodule FLAME.Pool do
 
     * `:max` - The maximum number of runners to elastically grow to in the pool.
 
-    * `:max_concurrency` - The maximum number of concurrent executions per runner before
-      booting new runners or queueing calls. Defaults to `100`.
+    * `:strategy` - The strategy to use. Defaults to `FLAME.Pool.PerRunnerMaxConcurrencyStrategy`.
 
     * `:single_use` - if `true`, runners will be terminated after each call completes.
       Defaults `false`.
@@ -183,7 +182,7 @@ defmodule FLAME.Pool do
               ],
               min: 1,
               max: 1,
-              max_concurrency: 10,
+              strategy: {FLAME.Pool.PerRunnerMaxConcurrencyStrategy, [max_concurrency: 10]},
               backend: {FLAME.FlyBackend,
                 cpu_kind: "performance", cpus: 4, memory_mb: 8192,
                 token: System.fetch_env!("FLY_API_TOKEN"),
@@ -203,7 +202,7 @@ defmodule FLAME.Pool do
       :min_idle_shutdown_after,
       :min,
       :max,
-      :max_concurrency,
+      :strategy,
       :backend,
       :log,
       :single_use,
@@ -417,7 +416,7 @@ defmodule FLAME.Pool do
       boot_timeout: boot_timeout,
       idle_shutdown_after: Keyword.get(opts, :idle_shutdown_after, @idle_shutdown_after),
       min_idle_shutdown_after: Keyword.get(opts, :min_idle_shutdown_after, :infinity),
-      max_concurrency: Keyword.get(opts, :max_concurrency, @default_max_concurrency),
+      strategy: Keyword.get(opts, :strategy, @default_strategy),
       on_grow_start: opts[:on_grow_start],
       on_grow_end: opts[:on_grow_end],
       on_shrink: opts[:on_shrink],
