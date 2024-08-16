@@ -549,6 +549,12 @@ defmodule FLAME.Pool do
 
       {:checkout, runner} ->
         reply_runner_checkout(state, runner, from, monitor_ref)
+
+      {{:checkout, runner}, :scale} ->
+        state
+        |> reply_runner_checkout(runner, from, monitor_ref)
+        |> async_boot_runner()
+        |> waiting_in(deadline, from)
     end
   end
 

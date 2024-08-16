@@ -1,8 +1,13 @@
 defmodule FLAME.Pool.Strategy do
   alias FLAME.Pool
 
-  @callback checkout_runner(state :: Pool.t(), opts :: Keyword.t()) ::
-              {:checkout, Pool.RunnerState.t()} | :wait | :scale
+  @type action ::
+          :wait
+          | :scale
+          | {:checkout, Pool.RunnerState.t()}
+          | {{:checkout, Pool.RunnerState.t()}, :scale}
+
+  @callback checkout_runner(state :: Pool.t(), opts :: Keyword.t()) :: action
 
   @callback assign_waiting_callers(
               state :: Pool.t(),
