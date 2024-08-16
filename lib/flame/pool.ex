@@ -562,7 +562,7 @@ defmodule FLAME.Pool do
     end
   end
 
-  def reply_runner_checkout(state, %RunnerState{} = runner, from, monitor_ref) do
+  defp reply_runner_checkout(state, %RunnerState{} = runner, from, monitor_ref) do
     # we pass monitor_ref down from waiting so we don't need to remonitor if already monitoring
     {from_pid, checkout_ref} = from
 
@@ -728,7 +728,7 @@ defmodule FLAME.Pool do
     %Pool{state | waiting: Queue.delete_by_key(state.waiting, caller_pid)}
   end
 
-  def pop_next_waiting_caller(%Pool{} = state) do
+  defp pop_next_waiting_caller(%Pool{} = state) do
     result =
       Queue.pop_until(state.waiting, fn _pid, %WaitingState{} = waiting ->
         %WaitingState{from: {pid, _}, monitor_ref: ref, deadline: deadline} = waiting
@@ -815,7 +815,9 @@ defmodule FLAME.Pool do
 
   defp has_unmet_servicable_demand?(%Pool{} = state) do
     runner_count = runner_count(state) + pending_count(state)
-    waiting_count(state) > map_size(state.pending_runners) * state.max_concurrency and runner_count < state.max
+
+    waiting_count(state) > map_size(state.pending_runners) * state.max_concurrency and
+      runner_count < state.max
   end
 
   defp handle_runner_async_up(%Pool{} = state, pid, ref) when is_pid(pid) and is_reference(ref) do
@@ -827,7 +829,14 @@ defmodule FLAME.Pool do
     new_state = maybe_on_grow_end(new_state, task_pid, :ok)
 
     {strategy_module, strategy_opts} = state.strategy
-    strategy_module.assign_waiting_callers(new_state, runner, strategy_opts)
+
+    pop = fn state -> pop_next_waiting_caller(state) end
+
+    checkout = fn state, runner, from, monitor_ref ->
+      reply_runner_checkout(state, runner, from, monitor_ref)
+    end
+
+    strategy_module.assign_waiting_callers(new_state, runner, pop, checkout, strategy_opts)
   end
 
   defp deadline(timeout) when is_integer(timeout) do

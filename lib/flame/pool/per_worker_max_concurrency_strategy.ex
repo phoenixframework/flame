@@ -24,7 +24,13 @@ defmodule FLAME.Pool.PerRunnerMaxConcurrencyStrategy do
     end
   end
 
-  def assign_waiting_callers(%Pool{} = pool, %Pool.RunnerState{} = runner, opts) do
+  def assign_waiting_callers(
+        %Pool{} = pool,
+        %Pool.RunnerState{} = runner,
+        pop_next_waiting_caller,
+        reply_runner_checkout,
+        opts
+      ) do
     max_concurrency = Keyword.fetch!(opts, :max_concurrency)
 
     # pop waiting callers up to max_concurrency, but we must handle:
@@ -35,9 +41,9 @@ defmodule FLAME.Pool.PerRunnerMaxConcurrencyStrategy do
       Enum.reduce_while(1..max_concurrency, {pool, 0}, fn _i, {pool, assigned_concurrency} ->
         with {:ok, %Pool.RunnerState{} = runner} <- Map.fetch(pool.runners, runner.monitor_ref),
              true <- assigned_concurrency <= max_concurrency do
-          case Pool.pop_next_waiting_caller(pool) do
+          case pop_next_waiting_caller.(pool) do
             {%Pool.WaitingState{} = next, pool} ->
-              pool = Pool.reply_runner_checkout(pool, runner, next.from, next.monitor_ref)
+              pool = reply_runner_checkout.(pool, runner, next.from, next.monitor_ref)
               {:cont, {pool, assigned_concurrency + 1}}
 
             {nil, pool} ->
