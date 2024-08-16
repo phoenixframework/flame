@@ -491,11 +491,15 @@ defmodule FLAME.Pool do
   end
 
   def runner_count(state) do
-    map_size(state.runners) + map_size(state.pending_runners)
+    map_size(state.runners)
   end
 
   def waiting_count(%Pool{waiting: %Queue{} = waiting}) do
     Queue.size(waiting)
+  end
+
+  def pending_count(state) do
+    map_size(state.pending_runners)
   end
 
   defp replace_caller(state, checkout_ref, caller_pid, child_pid) do
@@ -623,7 +627,8 @@ defmodule FLAME.Pool do
 
   defp async_boot_runner(%Pool{on_grow_start: on_grow_start, name: name} = state) do
     {strategy_module, strategy_opts} = state.strategy
-    current_count = runner_count(state)
+
+    current_count = runner_count(state) + pending_count(state)
     new_count = strategy_module.desired_count(state, strategy_opts)
 
     num_tasks = max(new_count - current_count, 0)
@@ -790,7 +795,7 @@ defmodule FLAME.Pool do
   end
 
   defp maybe_on_grow_end(%Pool{on_grow_end: on_grow_end} = state, pid, result) do
-    new_count = runner_count(state)
+    new_count = runner_count(state) + pending_count(state)
     meta = %{count: new_count, name: state.name, pid: pid}
 
     case result do
@@ -802,15 +807,15 @@ defmodule FLAME.Pool do
   end
 
   defp maybe_on_shrink(%Pool{} = state) do
-    new_count = runner_count(state)
+    new_count = runner_count(state) + pending_count(state)
     if state.on_shrink, do: state.on_shrink.(%{count: new_count, name: state.name})
 
     state
   end
 
   defp has_unmet_servicable_demand?(%Pool{} = state) do
-    waiting_count(state) > map_size(state.pending_runners) * state.max_concurrency and
-      runner_count(state) < state.max
+    runner_count = runner_count(state) + pending_count(state)
+    waiting_count(state) > map_size(state.pending_runners) * state.max_concurrency and runner_count < state.max
   end
 
   defp handle_runner_async_up(%Pool{} = state, pid, ref) when is_pid(pid) and is_reference(ref) do

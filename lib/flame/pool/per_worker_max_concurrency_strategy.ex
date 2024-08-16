@@ -4,24 +4,19 @@ defmodule FLAME.Pool.PerRunnerMaxConcurrencyStrategy do
 
   def checkout_runner(%Pool{} = pool, opts) do
     min_runner = min_runner(pool)
-    runner_count = Pool.runner_count(pool)
+    runner_count = Pool.runner_count(pool) + Pool.pending_count(pool)
     max_concurrency = Keyword.fetch!(opts, :max_concurrency)
 
     cond do
-      min_runner && min_runner.count < state.max_concurrency ->
-        reply_runner_checkout(state, min_runner, from, monitor_ref)
+      min_runner && min_runner.count < max_concurrency ->
         {:checkout, min_runner}
 
-      runner_count < state.max ->
-        if state.async_boot_timer ||
-             map_size(state.pending_runners) * state.max_concurrency > waiting_count(state) do
+      runner_count < pool.max ->
+        if pool.async_boot_timer ||
+             map_size(pool.pending_runners) * max_concurrency > Pool.waiting_count(pool) do
           :wait
         else
-          :scale
-
-          state
-          |> async_boot_runner()
-          |> waiting_in(deadline, from)
+          {{:checkout, min_runner}, :scale}
         end
 
       true ->
@@ -57,7 +52,7 @@ defmodule FLAME.Pool.PerRunnerMaxConcurrencyStrategy do
   end
 
   def desired_count(%Pool{} = pool, _opts) do
-    Pool.runner_count(pool) + 1
+    Pool.runner_count(pool) + Pool.pending_count(pool) + 1
   end
 
   defp min_runner(pool) do
