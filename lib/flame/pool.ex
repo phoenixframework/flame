@@ -8,6 +8,7 @@ end
 defmodule FLAME.Pool.WaitingState do
   @moduledoc false
 
+  @type t :: %__MODULE__{}
   defstruct from: nil, monitor_ref: nil, deadline: nil
 end
 
