@@ -542,24 +542,15 @@ defmodule FLAME.Pool do
   defp checkout_runner(%Pool{} = state, deadline, from, monitor_ref \\ nil) do
     {strategy_module, strategy_opts} = state.strategy
 
-    case strategy_module.checkout_runner(state, strategy_opts) do
-      :wait ->
-        waiting_in(state, deadline, from)
+    actions = strategy_module.checkout_runner(state, strategy_opts)
 
-      :scale ->
-        state
-        |> async_boot_runner()
-        |> waiting_in(deadline, from)
-
-      {:checkout, runner} ->
-        reply_runner_checkout(state, runner, from, monitor_ref)
-
-      {{:checkout, runner}, :scale} ->
-        state
-        |> reply_runner_checkout(runner, from, monitor_ref)
-        |> async_boot_runner()
-        |> waiting_in(deadline, from)
-    end
+    Enum.reduce(actions, state, fn action, acc ->
+      case action do
+        :wait -> waiting_in(acc, deadline, from)
+        :scale -> async_boot_runner(acc)
+        {:checkout, runner} -> reply_runner_checkout(acc, runner, from, monitor_ref)
+      end
+    end)
   end
 
   defp reply_runner_checkout(state, %RunnerState{} = runner, from, monitor_ref) do

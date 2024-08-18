@@ -5,9 +5,8 @@ defmodule FLAME.Pool.Strategy do
           :wait
           | :scale
           | {:checkout, Pool.RunnerState.t()}
-          | {{:checkout, Pool.RunnerState.t()}, :scale}
 
-  @callback checkout_runner(state :: Pool.t(), opts :: Keyword.t()) :: action
+  @callback checkout_runner(state :: Pool.t(), opts :: Keyword.t()) :: list(action)
 
   @type pop_next_waiting_caller_fun :: (Pool.t() -> {Pool.WaitingState.t() | nil, Pool.t()})
   @type reply_runner_checkout_fun ::

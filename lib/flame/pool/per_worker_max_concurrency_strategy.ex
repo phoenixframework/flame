@@ -9,18 +9,18 @@ defmodule FLAME.Pool.PerRunnerMaxConcurrencyStrategy do
 
     cond do
       min_runner && min_runner.count < max_concurrency ->
-        {:checkout, min_runner}
+        [{:checkout, min_runner}]
 
       runner_count < pool.max ->
         if pool.async_boot_timer ||
              map_size(pool.pending_runners) * max_concurrency > Pool.waiting_count(pool) do
-          :wait
+          [:wait]
         else
-          {{:checkout, min_runner}, :scale}
+          [:scale, :wait]
         end
 
       true ->
-        :wait
+        [:wait]
     end
   end
 
