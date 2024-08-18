@@ -51,7 +51,7 @@ defmodule FLAME.FlyBackend do
       * `:entrypoint` – list strings for the entrypoint command
       * `:exec` – list of strings for the exec command
       * `:kernel_args` - list of strings
-      * `:swap_size_mb` – integer value in megabytes for th swap size
+      * `:swap_size_mb` – integer value in megabytes for the swap size
       * `:tty` – boolean
 
   * `:services` - The optional services to run on the machine. Defaults to `[]`.
@@ -60,7 +60,7 @@ defmodule FLAME.FlyBackend do
 
   ## Environment Variables
 
-  The FLAME Fly machines do *do not* inherit the environment variables of the parent.
+  The FLAME Fly machines *do not* inherit the environment variables of the parent.
   You must explicit provide the environment that you would like to forward to the
   machine. For example, if your FLAME's are starting your Ecto repos, you can copy
   the env from the parent:

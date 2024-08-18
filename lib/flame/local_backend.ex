@@ -31,7 +31,7 @@ defmodule FLAME.LocalBackend do
 
       other ->
         raise ArgumentError,
-              "expected a null arity function or {mod, func, args. Got: #{inspect(other)}"
+              "expected a null arity function or {mod, func, args}. Got: #{inspect(other)}"
     end
   end
 
