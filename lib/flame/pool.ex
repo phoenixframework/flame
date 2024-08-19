@@ -754,8 +754,15 @@ defmodule FLAME.Pool do
   defp handle_down(%Pool{} = state, {:DOWN, ref, :process, pid, reason}) do
     state = maybe_drop_waiting(state, pid)
 
+    %{
+      callers: callers,
+      runners: runners,
+      pending_runners: pending_runners,
+      strategy: {strategy_module, strategy_opts}
+    } = state
+
     state =
-      case state.callers do
+      case callers do
         %{^pid => %Caller{monitor_ref: ^ref} = caller} ->
           drop_caller(state, pid, caller)
 
@@ -764,16 +771,16 @@ defmodule FLAME.Pool do
       end
 
     state =
-      case state.runners do
+      case runners do
         %{^ref => _} -> drop_child_runner(state, ref)
         %{} -> state
       end
 
-    case state.pending_runners do
+    case pending_runners do
       %{^ref => _} ->
         state = %Pool{state | pending_runners: Map.delete(state.pending_runners, ref)}
         # we rate limit this to avoid many failed async boot attempts
-        if has_unmet_servicable_demand?(state) do
+        if strategy_module.has_unmet_servicable_demand?(state, strategy_opts) do
           state
           |> maybe_on_grow_end(pid, {:exit, reason})
           |> schedule_async_boot_runner()
@@ -803,13 +810,6 @@ defmodule FLAME.Pool do
     if state.on_shrink, do: state.on_shrink.(%{count: new_count, name: state.name})
 
     state
-  end
-
-  defp has_unmet_servicable_demand?(%Pool{} = state) do
-    runner_count = runner_count(state) + pending_count(state)
-
-    waiting_count(state) > map_size(state.pending_runners) * state.max_concurrency and
-      runner_count < state.max
   end
 
   defp handle_runner_async_up(%Pool{} = state, pid, ref) when is_pid(pid) and is_reference(ref) do

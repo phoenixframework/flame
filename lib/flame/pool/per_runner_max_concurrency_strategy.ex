@@ -61,6 +61,11 @@ defmodule FLAME.Pool.PerRunnerMaxConcurrencyStrategy do
     Pool.runner_count(pool) + Pool.pending_count(pool) + 1
   end
 
+  def has_unmet_servicable_demand?(%Pool{} = pool, _opts) do
+    runner_count = Pool.runner_count(pool) + Pool.pending_count(pool)
+    Pool.waiting_count(pool) > 0 and runner_count < pool.max
+  end
+
   defp min_runner(pool) do
     if map_size(pool.runners) == 0 do
       nil
