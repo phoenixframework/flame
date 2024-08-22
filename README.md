@@ -1,4 +1,4 @@
-# Flame
+# FlAME
 
 [![Hex.pm version](https://img.shields.io/hexpm/v/flame.svg)](https://hex.pm/packages/flame)
 [![Hex.pm downloads](https://img.shields.io/hexpm/dt/flame.svg)](https://hex.pm/packages/flame)
