@@ -248,7 +248,12 @@ defmodule FLAME.CodeSync do
     |> Stream.map(fn parent_dir ->
       case Path.basename(parent_dir) do
         "ebin" -> Path.join(Path.dirname(parent_dir), "**/*")
-        _ -> Path.join(parent_dir, "*")
+        _ ->
+          if File.regular?(parent_dir, [:raw]) do
+            parent_dir
+          else
+            Path.join(parent_dir, "*")
+          end
       end
     end)
     |> Stream.uniq()
