@@ -376,14 +376,16 @@ defmodule FLAME.Runner do
         code_sync_opts: Keyword.get(opts, :code_sync, false)
       }
 
+    base_backend_opts = Keyword.take(opts, [:boot_timeout])
+
     {backend, backend_init} =
       case Keyword.fetch!(opts, :backend) do
         backend when is_atom(backend) ->
-          opts = Application.get_env(:flame, backend) || []
-          {backend, backend.init(opts)}
+          backend_opts = Keyword.merge(base_backend_opts, Application.get_env(:flame, backend) || [])
+          {backend, backend.init(backend_opts)}
 
-        {backend, opts} when is_atom(backend) and is_list(opts) ->
-          {backend, backend.init(opts)}
+        {backend, backend_opts} when is_atom(backend) and is_list(backend_opts) ->
+          {backend, backend.init(Keyword.merge(base_backend_opts, backend_opts))}
       end
 
     %Runner{runner | backend: backend, backend_init: backend_init}

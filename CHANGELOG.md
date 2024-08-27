@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 (2024-08-27)
+
+### Bug Fixes
+- Forward `:boot_timeout` to backend options
+
+### Enhancements
+-  Optimize concurrent runner booting
+
 ## 0.3.0 (2024-07-26)
 
 ### Bug Fixes
@@ -48,4 +56,3 @@
 ## 0.1.4 (2023-12-06)
 
 Public release 🔥
-
