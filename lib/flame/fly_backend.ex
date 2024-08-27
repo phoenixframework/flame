@@ -183,6 +183,8 @@ defmodule FLAME.FlyBackend do
 
     %FlyBackend{} = state = Map.merge(default, Map.new(provided_opts))
 
+    IO.inspect({opts, state.boot_timeout})
+
     for key <- [:token, :image, :host, :app] do
       unless Map.get(state, key) do
         raise ArgumentError, "missing :#{key} config for #{inspect(__MODULE__)}"

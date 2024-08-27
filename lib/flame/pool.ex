@@ -532,7 +532,7 @@ defmodule FLAME.Pool do
     cond do
       runner_count == 0 || !min_runner ||
           (min_runner.count == state.max_concurrency && runner_count < state.max) ->
-        if map_size(state.pending_runners) > 0 || state.async_boot_timer do
+        if state.async_boot_timer || map_size(state.pending_runners) * state.max_concurrency > Queue.size(state.waiting) do
           waiting_in(state, deadline, from)
         else
           state

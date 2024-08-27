@@ -26,7 +26,7 @@ defmodule FLAME.FlyBackendTest do
     end
 
     assert_raise ArgumentError, ~r/missing :app/, fn ->
-      new({FlyBackend, token: "123", image: "img"})
+      new({FlyBackend, token: "123", image: "img", boot_timeout: 55123})
     end
 
     assert new({FlyBackend, token: "123", image: "img", app: "app"})
