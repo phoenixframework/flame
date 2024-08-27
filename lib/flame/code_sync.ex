@@ -163,7 +163,7 @@ defmodule FLAME.CodeSync do
 
         :ok = :erl_tar.close(tar)
 
-        File.stream!(out_path, [], 2048)
+        File.stream!(out_path, [], 64_000)
       end
 
     %PackagedStream{

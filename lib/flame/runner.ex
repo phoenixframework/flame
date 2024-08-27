@@ -84,8 +84,8 @@ defmodule FLAME.Runner do
   @doc """
   Boots the remote runner using the `FLAME.Backend`.
   """
-  def remote_boot(pid, timeout \\ nil) when is_pid(pid) do
-    GenServer.call(pid, {:remote_boot, timeout}, timeout || :infinity)
+  def remote_boot(pid, base_sync_stream, timeout \\ nil) when is_pid(pid) do
+    GenServer.call(pid, {:remote_boot, base_sync_stream, timeout}, timeout || :infinity)
   end
 
   @doc """
@@ -278,7 +278,7 @@ defmodule FLAME.Runner do
     {:reply, :ok, drop_checkout(state, ref)}
   end
 
-  def handle_call({:remote_boot, _timeout}, _from, state) do
+  def handle_call({:remote_boot, base_sync_stream, _timeout}, _from, state) do
     %{runner: runner, backend_state: backend_state, otp_app: otp_app} = state
 
     case runner.status do
@@ -292,7 +292,7 @@ defmodule FLAME.Runner do
               Process.monitor(remote_terminator_pid)
               new_runner = %Runner{runner | terminator: remote_terminator_pid, status: :booted}
               new_state = %{state | runner: new_runner, backend_state: new_backend_state}
-              {new_state, parent_stream} = maybe_stream_code_paths(new_state)
+              {new_state, parent_stream} = maybe_stream_code_paths(new_state, base_sync_stream)
 
               %Runner{
                 single_use: single_use,
@@ -315,8 +315,6 @@ defmodule FLAME.Runner do
                     :ok
                   end
                 end)
-
-              if parent_stream, do: CodeSync.rm_packaged_stream(parent_stream)
 
               {:reply, :ok, new_state}
 
@@ -503,12 +501,11 @@ defmodule FLAME.Runner do
     end
   end
 
-  defp maybe_stream_code_paths(%{runner: %Runner{} = runner} = state) do
-    if code_sync_opts = runner.code_sync_opts do
-      code_sync = CodeSync.new(code_sync_opts)
-      %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(code_sync)
+  defp maybe_stream_code_paths(%{runner: %Runner{} = runner} = state, base_sync_stream) do
+    if base_sync_stream do
+      code_sync = CodeSync.new(runner.code_sync_opts)
       new_runner = %Runner{runner | code_sync: code_sync}
-      {%{state | runner: new_runner}, parent_stream}
+      {%{state | runner: new_runner}, base_sync_stream}
     else
       {state, nil}
     end

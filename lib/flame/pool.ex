@@ -37,7 +37,7 @@ defmodule FLAME.Pool do
   """
   use GenServer
 
-  alias FLAME.{Pool, Runner, Queue}
+  alias FLAME.{Pool, Runner, Queue, CodeSync}
   alias FLAME.Pool.{RunnerState, WaitingState, Caller}
 
   @default_max_concurrency 100
@@ -65,7 +65,8 @@ defmodule FLAME.Pool do
             on_grow_end: nil,
             on_shrink: nil,
             async_boot_timer: nil,
-            track_resources: false
+            track_resources: false,
+            base_sync_stream: nil
 
   def child_spec(opts) do
     %{
@@ -389,6 +390,13 @@ defmodule FLAME.Pool do
         min
       end
 
+    base_sync_stream =
+      if code_sync_opts = opts[:code_sync] do
+        code_sync = CodeSync.new(code_sync_opts)
+        %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(code_sync)
+        parent_stream
+      end
+
     state = %Pool{
       runner_sup: Keyword.fetch!(opts, :runner_sup),
       task_sup: task_sup,
@@ -405,7 +413,8 @@ defmodule FLAME.Pool do
       on_grow_end: opts[:on_grow_end],
       on_shrink: opts[:on_shrink],
       track_resources: track_resources,
-      runner_opts: runner_opts
+      runner_opts: runner_opts,
+      base_sync_stream: base_sync_stream
     }
 
     {:ok, boot_runners(state)}
@@ -530,18 +539,18 @@ defmodule FLAME.Pool do
     runner_count = runner_count(state)
 
     cond do
-      runner_count == 0 || !min_runner ||
-          (min_runner.count == state.max_concurrency && runner_count < state.max) ->
-        if map_size(state.pending_runners) > 0 || state.async_boot_timer do
+      min_runner && min_runner.count < state.max_concurrency ->
+        reply_runner_checkout(state, min_runner, from, monitor_ref)
+
+      runner_count < state.max ->
+        if state.async_boot_timer ||
+             map_size(state.pending_runners) * state.max_concurrency > waiting_count(state) do
           waiting_in(state, deadline, from)
         else
           state
           |> async_boot_runner()
           |> waiting_in(deadline, from)
         end
-
-      min_runner && min_runner.count < state.max_concurrency ->
-        reply_runner_checkout(state, min_runner, from, monitor_ref)
 
       true ->
         waiting_in(state, deadline, from)
@@ -638,7 +647,7 @@ defmodule FLAME.Pool do
     {:ok, pid} = DynamicSupervisor.start_child(state.runner_sup, spec)
 
     try do
-      case Runner.remote_boot(pid) do
+      case Runner.remote_boot(pid, state.base_sync_stream) do
         :ok -> {:ok, pid}
         {:error, reason} -> {:error, reason}
       end
@@ -788,7 +797,8 @@ defmodule FLAME.Pool do
   end
 
   defp has_unmet_servicable_demand?(%Pool{} = state) do
-    waiting_count(state) > 0 and runner_count(state) < state.max
+    waiting_count(state) > map_size(state.pending_runners) * state.max_concurrency and
+      runner_count(state) < state.max
   end
 
   defp handle_runner_async_up(%Pool{} = state, pid, ref) when is_pid(pid) and is_reference(ref) do
@@ -804,27 +814,20 @@ defmodule FLAME.Pool do
     # 2. the case where we process a DOWN for the new runner as we pop DOWNs
     #   looking for fresh waiting
     # 3. if we still have waiting callers at the end, boot more runners if we have capacity
-    new_state =
-      Enum.reduce_while(1..state.max_concurrency, new_state, fn i, acc ->
-        with {:ok, %RunnerState{} = runner} <- Map.fetch(acc.runners, runner.monitor_ref),
-             true <- i <= acc.max_concurrency do
-          case pop_next_waiting_caller(acc) do
-            {%WaitingState{} = next, acc} ->
-              {:cont, reply_runner_checkout(acc, runner, next.from, next.monitor_ref)}
+    Enum.reduce_while(1..state.max_concurrency, new_state, fn i, acc ->
+      with {:ok, %RunnerState{} = runner} <- Map.fetch(acc.runners, runner.monitor_ref),
+           true <- i <= acc.max_concurrency do
+        case pop_next_waiting_caller(acc) do
+          {%WaitingState{} = next, acc} ->
+            {:cont, reply_runner_checkout(acc, runner, next.from, next.monitor_ref)}
 
-            {nil, acc} ->
-              {:halt, acc}
-          end
-        else
-          _ -> {:halt, acc}
+          {nil, acc} ->
+            {:halt, acc}
         end
-      end)
-
-    if has_unmet_servicable_demand?(new_state) do
-      async_boot_runner(new_state)
-    else
-      new_state
-    end
+      else
+        _ -> {:halt, acc}
+      end
+    end)
   end
 
   defp deadline(timeout) when is_integer(timeout) do
