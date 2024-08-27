@@ -316,8 +316,6 @@ defmodule FLAME.Runner do
                   end
                 end)
 
-              if parent_stream, do: CodeSync.rm_packaged_stream(parent_stream)
-
               {:reply, :ok, new_state}
 
             {:error, reason} ->
