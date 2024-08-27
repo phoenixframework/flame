@@ -21,8 +21,8 @@ defmodule FLAME do
   web requests, etc, to come to crawl. This is where folks typically reach for
   FaaS or external service solutions, but FLAME gives you a better way.
 
-  Simply wrap your your existing code in a FLAME function and it will be executed
-  on a newly spawned, ephemeral node. Using Elixir and Erlang's built in distribution
+  Simply wrap your existing code in a FLAME function and it will be executed
+  on a newly spawned, ephemeral node. Using Elixir and Erlang's built-in distribution
   features, entire function closures, including any state they close over, can be sent
   and executed on a remote node:
 
@@ -49,7 +49,7 @@ defmodule FLAME do
   ## Pools
 
   A `FLAME.Pool` provides elastic runner scaling, allowing a minimum and
-  maximum number of runners to be configured, and idle'd down as load decreases.
+  maximum number of runners to be configured, and idled down as load decreases.
 
   Pools give you elastic scale that maximizes the newly spawned hardware.
   At the same time, you also want to avoid spawning unbound resources. You also
@@ -68,10 +68,10 @@ defmodule FLAME do
       ]
 
   Here we add a `FLAME.Pool` to our application supervision tree, configuring
-  a minimum of 0 and maximum of 10 runners. This acheives "scale to zero" behavior
+  a minimum of 0 and maximum of 10 runners. This achieves "scale to zero" behavior
   while also allowing the pool to scale up to 10 runners when load increases.
   Each runner in the case will be able to execute up to 5 concurrent functions.
-  The runners will shutdown after 30 seconds of inactivity.
+  The runners will shut down after 30 seconds of inactivity.
 
   Calling a pool is as simple as passing its name to the FLAME functions:
 

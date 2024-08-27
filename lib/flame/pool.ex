@@ -123,7 +123,7 @@ defmodule FLAME.Pool do
         * `:count` - The number of runners the pool is attempting to grow to
         * `:pid` - The pid of the async process that is booting the new runner
 
-     * `:on_grow_end` - The optional 2-arty function to be called when the pool growth process completes.
+     * `:on_grow_end` - The optional 2-arity function to be called when the pool growth process completes.
       The 2-arity function receives either `:ok` or `{:exit, reason}`, and map with the following metadata:
 
         * `:name` - The name of the pool
@@ -158,7 +158,7 @@ defmodule FLAME.Pool do
         only the specific beam files will be synced on boot and for subsequent calls.
         Defaults to `[]`.
 
-      * `:start_apps` – Either a boolean or a list of specific OTP applications names to start
+      * `:start_apps` – Either a boolean or a list of specific OTP application names to start
         when the runner boots. When `true`, all applications currently running on the parent node
         are sent to the runner node to be started. Defaults to `false`.
 

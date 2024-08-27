@@ -16,7 +16,7 @@ defmodule FLAME.Parent do
     * `:backend_vsn` - The FLAME backend version running on the parent.
     * `:node_base` - The node basename the parent generated for the runner.
     * `:host_env` - The environment variable name on the runner to use to
-      to lookup the runner's hostname for the runner's longname.
+      lookup the runner's hostname for the runner's longname.
   """
 
   @flame_vsn Keyword.fetch!(Mix.Project.config(), :version)
