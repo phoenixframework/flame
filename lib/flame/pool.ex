@@ -797,7 +797,8 @@ defmodule FLAME.Pool do
   end
 
   defp has_unmet_servicable_demand?(%Pool{} = state) do
-    waiting_count(state) > map_size(state.pending_runners) * state.max_concurrency and runner_count(state) < state.max
+    waiting_count(state) > map_size(state.pending_runners) * state.max_concurrency and
+      runner_count(state) < state.max
   end
 
   defp handle_runner_async_up(%Pool{} = state, pid, ref) when is_pid(pid) and is_reference(ref) do
@@ -815,7 +816,7 @@ defmodule FLAME.Pool do
     # 3. if we still have waiting callers at the end, boot more runners if we have capacity
     Enum.reduce_while(1..state.max_concurrency, new_state, fn i, acc ->
       with {:ok, %RunnerState{} = runner} <- Map.fetch(acc.runners, runner.monitor_ref),
-            true <- i <= acc.max_concurrency do
+           true <- i <= acc.max_concurrency do
         case pop_next_waiting_caller(acc) do
           {%WaitingState{} = next, acc} ->
             {:cont, reply_runner_checkout(acc, runner, next.from, next.monitor_ref)}
