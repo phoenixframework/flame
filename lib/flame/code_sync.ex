@@ -9,7 +9,8 @@ defmodule FLAME.CodeSync.PackagedStream do
             sync_beam_hashes: %{},
             deleted_paths: [],
             purge_modules: [],
-            verbose: false
+            verbose: false,
+            compress: false
 end
 
 defmodule FLAME.CodeSync do
@@ -30,7 +31,8 @@ defmodule FLAME.CodeSync do
             changed_paths: [],
             deleted_paths: [],
             purge_modules: [],
-            verbose: false
+            verbose: false,
+            compress: false
 
   def new(opts \\ []) do
     Keyword.validate!(opts, [
@@ -39,7 +41,8 @@ defmodule FLAME.CodeSync do
       :copy_paths,
       :sync_beams,
       :start_apps,
-      :verbose
+      :verbose,
+      :compress
     ])
 
     copy_paths =
@@ -72,7 +75,8 @@ defmodule FLAME.CodeSync do
       tmp_dir: Keyword.get(opts, :tmp_dir, {System, :tmp_dir!, []}),
       extract_dir: Keyword.get(opts, :extract_dir, {Function, :identity, ["/"]}),
       start_apps: Keyword.get(opts, :start_apps, true),
-      verbose: Keyword.get(opts, :verbose, false)
+      verbose: Keyword.get(opts, :verbose, false),
+      compress: Keyword.get(opts, :compress, false)
     })
   end
 
@@ -139,6 +143,7 @@ defmodule FLAME.CodeSync do
   end
 
   def package_to_stream(%CodeSync{} = code) do
+    compressed = if code.compress, do: [:compressed], else: []
     verbose =
       if code.verbose do
         if !Enum.empty?(code.changed_paths),
@@ -156,7 +161,7 @@ defmodule FLAME.CodeSync do
       if code.changed_paths != [] do
         out_path = Path.join([mfa(code.tmp_dir), "flame_parent_code_sync_#{code.id}.tar.gz"])
         dirs = for path <- code.changed_paths, uniq: true, do: String.to_charlist(path)
-        {:ok, tar} = :erl_tar.open(out_path, [:write, :compressed])
+        {:ok, tar} = :erl_tar.open(out_path, [:write] ++ compressed)
 
         for dir <- dirs,
             do: :erl_tar.add(tar, dir, trim_leading_slash(dir), [:dereference | verbose])
@@ -176,7 +181,8 @@ defmodule FLAME.CodeSync do
       purge_modules: code.purge_modules,
       apps_to_start: code.apps_to_start,
       stream: out_stream,
-      verbose: code.verbose
+      verbose: code.verbose,
+      compress: code.compress
     }
   end
 
@@ -186,6 +192,7 @@ defmodule FLAME.CodeSync do
   def extract_packaged_stream(%PackagedStream{} = pkg) do
     if pkg.stream do
       verbose = if pkg.verbose, do: [:verbose], else: []
+      compressed = if pkg.compress, do: [:compressed], else: []
       extract_dir = mfa(pkg.extract_dir)
       target_tmp_path = Path.join([mfa(pkg.tmp_dir), "flame_child_code_sync_#{pkg.id}.tar.gz"])
       flame_stream = File.stream!(target_tmp_path)
@@ -193,7 +200,7 @@ defmodule FLAME.CodeSync do
       Enum.into(pkg.stream, flame_stream)
 
       # extract tar
-      :ok = :erl_tar.extract(target_tmp_path, [{:cwd, extract_dir}, :compressed | verbose])
+      :ok = :erl_tar.extract(target_tmp_path, [{:cwd, extract_dir}] ++ compressed ++ verbose)
 
       # add code paths
       :ok = add_code_paths_from_tar(pkg, extract_dir)

@@ -166,6 +166,9 @@ defmodule FLAME.Pool do
       * `:verbose` – If `true`, the pool will log verbose information about the code sync process.
         Defaults to `false`.
 
+      * `:compress` – If `true`, the copy_paths and sync_beams will be compressed before sending.
+        Provides savings in network payload size at the cost of CPU time. Defaults to `false`.
+
       For example, in [Livebook](https://livebook.dev/), to start a pool with code sync enabled:
 
           Mix.install([:kino, :flame])
@@ -214,7 +217,7 @@ defmodule FLAME.Pool do
       :track_resources
     ])
 
-    Keyword.validate!(opts[:code_sync] || [], [:copy_paths, :sync_beams, :start_apps, :verbose])
+    Keyword.validate!(opts[:code_sync] || [], [:copy_paths, :sync_beams, :start_apps, :verbose, :compress])
 
     GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
   end
