@@ -217,7 +217,13 @@ defmodule FLAME.Pool do
       :track_resources
     ])
 
-    Keyword.validate!(opts[:code_sync] || [], [:copy_paths, :sync_beams, :start_apps, :verbose, :compress])
+    Keyword.validate!(opts[:code_sync] || [], [
+      :copy_paths,
+      :sync_beams,
+      :start_apps,
+      :verbose,
+      :compress
+    ])
 
     GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
   end

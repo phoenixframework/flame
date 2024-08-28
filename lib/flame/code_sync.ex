@@ -144,6 +144,7 @@ defmodule FLAME.CodeSync do
 
   def package_to_stream(%CodeSync{} = code) do
     compressed = if code.compress, do: [:compressed], else: []
+
     verbose =
       if code.verbose do
         if !Enum.empty?(code.changed_paths),
