@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 (2024-08-27)
+
+### Bug Fixes
+- Fix beam files not being copied on first sync
+
 ## 0.4.0 (2024-08-27)
 
 ### Bug Fixes
