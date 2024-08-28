@@ -392,7 +392,7 @@ defmodule FLAME.Pool do
 
     base_sync_stream =
       if code_sync_opts = opts[:code_sync] do
-        code_sync = CodeSync.new(code_sync_opts)
+        code_sync = CodeSync.new(Keyword.put(code_sync_opts, :sync_beams, []))
         %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(code_sync)
         parent_stream
       end

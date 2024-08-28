@@ -292,7 +292,7 @@ defmodule FLAME.Runner do
               Process.monitor(remote_terminator_pid)
               new_runner = %Runner{runner | terminator: remote_terminator_pid, status: :booted}
               new_state = %{state | runner: new_runner, backend_state: new_backend_state}
-              {new_state, parent_stream} = maybe_stream_code_paths(new_state, base_sync_stream)
+              {new_state, beams_stream} = maybe_stream_code_paths(new_state)
 
               %Runner{
                 single_use: single_use,
@@ -309,11 +309,9 @@ defmodule FLAME.Runner do
                   :ok =
                     Terminator.schedule_idle_shutdown(term, idle_after, idle_check, single_use)
 
-                  if parent_stream do
-                    :ok = CodeSync.extract_packaged_stream(parent_stream)
-                  else
-                    :ok
-                  end
+                  if base_sync_stream, do: CodeSync.extract_packaged_stream(base_sync_stream)
+                  if beams_stream, do: CodeSync.extract_packaged_stream(beams_stream)
+                  :ok
                 end)
 
               {:reply, :ok, new_state}
@@ -381,7 +379,9 @@ defmodule FLAME.Runner do
     {backend, backend_init} =
       case Keyword.fetch!(opts, :backend) do
         backend when is_atom(backend) ->
-          backend_opts = Keyword.merge(base_backend_opts, Application.get_env(:flame, backend) || [])
+          backend_opts =
+            Keyword.merge(base_backend_opts, Application.get_env(:flame, backend) || [])
+
           {backend, backend.init(backend_opts)}
 
         {backend, backend_opts} when is_atom(backend) and is_list(backend_opts) ->
@@ -503,11 +503,12 @@ defmodule FLAME.Runner do
     end
   end
 
-  defp maybe_stream_code_paths(%{runner: %Runner{} = runner} = state, base_sync_stream) do
-    if base_sync_stream do
-      code_sync = CodeSync.new(runner.code_sync_opts)
+  defp maybe_stream_code_paths(%{runner: %Runner{} = runner} = state) do
+    if code_sync_opts = runner.code_sync_opts do
+      code_sync = CodeSync.new(Keyword.put(code_sync_opts, :copy_paths, []))
+      %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(code_sync)
       new_runner = %Runner{runner | code_sync: code_sync}
-      {%{state | runner: new_runner}, base_sync_stream}
+      {%{state | runner: new_runner}, parent_stream}
     else
       {state, nil}
     end
