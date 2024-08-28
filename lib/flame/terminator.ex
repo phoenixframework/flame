@@ -330,50 +330,55 @@ defmodule FLAME.Terminator do
   end
 
   defp drop_caller(%Terminator{} = state, ref) when is_reference(ref) do
-    %{^ref => %Caller{} = caller} = state.calls
-    if caller.timer, do: Process.cancel_timer(caller.timer)
-    state = %Terminator{state | calls: Map.delete(state.calls, ref)}
+    case state.calls do
+      %{^ref => %Caller{} = caller} ->
+        if caller.timer, do: Process.cancel_timer(caller.timer)
+        state = %Terminator{state | calls: Map.delete(state.calls, ref)}
 
-    # if the caller going down was one that placed a child, and the child is still tracked:
-    #  - if the child is not linked (link: false), do nothing
-    #  - if the child is linked, terminate the child. there is no need to notify the og caller,
-    #   as they linked themselves.
-    #
-    # Note: there is also a race where we can't rely on the link to have happened to so we
-    # must monitor in the terminator even with the remote link
-    state =
-      with placed_child_ref <- caller.placed_child_ref,
-           true <- is_reference(placed_child_ref),
-           %{^placed_child_ref => %Caller{} = placed_child} <- state.calls,
-           true <- placed_child.link? do
-        if placed_child.timer, do: Process.cancel_timer(placed_child.timer)
-        Process.demonitor(placed_child_ref, [:flush])
-        DynamicSupervisor.terminate_child(state.child_placement_sup, placed_child.from_pid)
-        %Terminator{state | calls: Map.delete(state.calls, placed_child_ref)}
-      else
-        _ -> state
-      end
+        # if the caller going down was one that placed a child, and the child is still tracked:
+        #  - if the child is not linked (link: false), do nothing
+        #  - if the child is linked, terminate the child. there is no need to notify the og caller,
+        #   as they linked themselves.
+        #
+        # Note: there is also a race where we can't rely on the link to have happened to so we
+        # must monitor in the terminator even with the remote link
+        state =
+          with placed_child_ref <- caller.placed_child_ref,
+               true <- is_reference(placed_child_ref),
+               %{^placed_child_ref => %Caller{} = placed_child} <- state.calls,
+               true <- placed_child.link? do
+            if placed_child.timer, do: Process.cancel_timer(placed_child.timer)
+            Process.demonitor(placed_child_ref, [:flush])
+            DynamicSupervisor.terminate_child(state.child_placement_sup, placed_child.from_pid)
+            %Terminator{state | calls: Map.delete(state.calls, placed_child_ref)}
+          else
+            _ -> state
+          end
 
-    # if the caller going down was a placed child, clean up the placed caller ref
-    state =
-      with placed_caller_ref <- caller.placed_caller_ref,
-           true <- is_reference(placed_caller_ref),
-           %{^placed_caller_ref => %Caller{} = placed_caller} <- state.calls do
-        if placed_caller.timer, do: Process.cancel_timer(placed_caller.timer)
-        Process.demonitor(placed_caller_ref, [:flush])
-        %Terminator{state | calls: Map.delete(state.calls, placed_caller_ref)}
-      else
-        _ -> state
-      end
+        # if the caller going down was a placed child, clean up the placed caller ref
+        state =
+          with placed_caller_ref <- caller.placed_caller_ref,
+               true <- is_reference(placed_caller_ref),
+               %{^placed_caller_ref => %Caller{} = placed_caller} <- state.calls do
+            if placed_caller.timer, do: Process.cancel_timer(placed_caller.timer)
+            Process.demonitor(placed_caller_ref, [:flush])
+            %Terminator{state | calls: Map.delete(state.calls, placed_caller_ref)}
+          else
+            _ -> state
+          end
 
-    state =
-      if state.single_use do
-        system_stop(state, "single use completed. Going down")
-      else
+        state =
+          if state.single_use do
+            system_stop(state, "single use completed. Going down")
+          else
+            state
+          end
+
+        maybe_schedule_shutdown(state)
+
+      _ ->
         state
-      end
-
-    maybe_schedule_shutdown(state)
+    end
   end
 
   defp maybe_schedule_shutdown(%{calls: calls, watchers: watchers} = state) do
