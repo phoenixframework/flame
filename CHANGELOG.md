@@ -3,7 +3,7 @@
 ## 0.4.2 (2024-08-27)
 
 ### Enhancements
--  Support `:compress` option to `code_sync` to control compression of copy_paths and sync_beams.
+-  Support `:compress` option to `code_sync` to control compression of `:copy_paths` and `:sync_beams`.
 
 ## 0.4.1 (2024-08-27)
 
