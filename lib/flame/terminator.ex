@@ -60,7 +60,7 @@ defmodule FLAME.Terminator do
       Defaults to lookup from `FLAME.Parent.get/0`.
 
     * `:failsafe_timeout` - The time to wait for a connection to the parent node
-      before shutting down the system. Defaults to 2 seconds.
+      before shutting down the system. Defaults to 20 seconds.
 
     * `:log` - The optional logging level. Defaults `false`.
   """
