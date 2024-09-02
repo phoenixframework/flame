@@ -347,7 +347,8 @@ defmodule FLAME.Runner do
       :start_apps,
       :tmp_dir,
       :extract_dir,
-      :verbose
+      :verbose,
+      :compress
     ])
 
     {idle_shutdown_after_ms, idle_check} =
