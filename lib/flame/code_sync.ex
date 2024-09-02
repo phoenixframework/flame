@@ -10,7 +10,8 @@ defmodule FLAME.CodeSync.PackagedStream do
             deleted_paths: [],
             purge_modules: [],
             verbose: false,
-            compress: false
+            compress: false,
+            chunk_size: 64_000
 end
 
 defmodule FLAME.CodeSync do
@@ -32,7 +33,8 @@ defmodule FLAME.CodeSync do
             deleted_paths: [],
             purge_modules: [],
             verbose: false,
-            compress: false
+            compress: false,
+            chunk_size: 64_000
 
   def new(opts \\ []) do
     Keyword.validate!(opts, [
@@ -42,7 +44,8 @@ defmodule FLAME.CodeSync do
       :sync_beams,
       :start_apps,
       :verbose,
-      :compress
+      :compress,
+      :chunk_size
     ])
 
     copy_paths =
@@ -76,7 +79,8 @@ defmodule FLAME.CodeSync do
       extract_dir: Keyword.get(opts, :extract_dir, {Function, :identity, ["/"]}),
       start_apps: Keyword.get(opts, :start_apps, true),
       verbose: Keyword.get(opts, :verbose, false),
-      compress: Keyword.get(opts, :compress, false)
+      compress: Keyword.get(opts, :compress, false),
+      chunk_size: Keyword.get(opts, :chunk_size, 64_000)
     })
   end
 
@@ -169,7 +173,7 @@ defmodule FLAME.CodeSync do
 
         :ok = :erl_tar.close(tar)
 
-        File.stream!(out_path, [], 64_000)
+        File.stream!(out_path, [], code.chunk_size)
       end
 
     %PackagedStream{
@@ -183,7 +187,8 @@ defmodule FLAME.CodeSync do
       apps_to_start: code.apps_to_start,
       stream: out_stream,
       verbose: code.verbose,
-      compress: code.compress
+      compress: code.compress,
+      chunk_size: code.chunk_size
     }
   end
 

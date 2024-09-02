@@ -306,11 +306,12 @@ defmodule FLAME.Runner do
                   # ensure app is fully started if parent connects before up
                   if otp_app, do: {:ok, _} = Application.ensure_all_started(otp_app)
 
+                  if base_sync_stream, do: CodeSync.extract_packaged_stream(base_sync_stream)
+                  if beams_stream, do: CodeSync.extract_packaged_stream(beams_stream)
+
                   :ok =
                     Terminator.schedule_idle_shutdown(term, idle_after, idle_check, single_use)
 
-                  if base_sync_stream, do: CodeSync.extract_packaged_stream(base_sync_stream)
-                  if beams_stream, do: CodeSync.extract_packaged_stream(beams_stream)
                   :ok
                 end)
 
@@ -348,7 +349,8 @@ defmodule FLAME.Runner do
       :tmp_dir,
       :extract_dir,
       :verbose,
-      :compress
+      :compress,
+      :chunk_size
     ])
 
     {idle_shutdown_after_ms, idle_check} =

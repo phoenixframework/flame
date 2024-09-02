@@ -222,7 +222,8 @@ defmodule FLAME.Pool do
       :sync_beams,
       :start_apps,
       :verbose,
-      :compress
+      :compress,
+      :chunk_size
     ])
 
     GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
@@ -403,6 +404,7 @@ defmodule FLAME.Pool do
       if code_sync_opts = opts[:code_sync] do
         code_sync = CodeSync.new(Keyword.put(code_sync_opts, :sync_beams, []))
         %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(code_sync)
+        IO.inspect(File.stat!(parent_stream.stream.path))
         parent_stream
       end
 
