@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.4 (2024-09-03)
+
+### Bug Fixes
+- Fix idle shutdown running before code sync, causing long code syncs to shut runners down prematurely
+
 ## 0.4.3 (2024-09-02)
 
 ### Bug Fixes
