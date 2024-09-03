@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3 (2024-09-02)
+
+### Bug Fixes
+- Fix `:compress` to `:code_sync` raise invalid option error
+
 ## 0.4.2 (2024-08-27)
 
 ### Enhancements

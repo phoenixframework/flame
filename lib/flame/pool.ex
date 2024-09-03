@@ -222,7 +222,8 @@ defmodule FLAME.Pool do
       :sync_beams,
       :start_apps,
       :verbose,
-      :compress
+      :compress,
+      :chunk_size
     ])
 
     GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
