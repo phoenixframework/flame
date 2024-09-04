@@ -48,8 +48,53 @@ defmodule FLAME.CodeSync do
       :chunk_size
     ])
 
+    compute_start_apps(%CodeSync{
+      id: System.unique_integer([:positive]),
+      copy_paths: Keyword.get(opts, :copy_paths, false),
+      sync_beams: Keyword.get(opts, :sync_beams, []),
+      tmp_dir: Keyword.get(opts, :tmp_dir, {System, :tmp_dir!, []}),
+      extract_dir: Keyword.get(opts, :extract_dir, {Function, :identity, ["/"]}),
+      start_apps: Keyword.get(opts, :start_apps, true),
+      verbose: Keyword.get(opts, :verbose, false),
+      compress: Keyword.get(opts, :compress, false),
+      chunk_size: Keyword.get(opts, :chunk_size, 64_000)
+    })
+  end
+
+  defp compute_start_apps(%CodeSync{} = code) do
+    apps_to_start =
+      case code.start_apps do
+        true ->
+          Enum.map(Application.started_applications(), fn {app, _desc, _vsn} -> app end)
+
+        false ->
+          []
+
+        apps when is_list(apps) ->
+          apps
+      end
+
+    %CodeSync{code | apps_to_start: apps_to_start}
+  end
+
+  def compute_sync_beams(%CodeSync{} = code) do
+    sync_beams_files = lookup_sync_beams_files(code.sync_beams)
+
+    beam_hashes =
+      for path <- sync_beams_files,
+          into: %{},
+          do: {path, :erlang.md5(File.read!(path))}
+
+    %CodeSync{
+      code
+      | sync_beam_hashes: beam_hashes,
+        changed_paths: Enum.uniq(code.changed_paths ++ sync_beams_files)
+    }
+  end
+
+  def compute_copy_paths(%CodeSync{} = code) do
     copy_paths =
-      case Keyword.get(opts, :copy_paths, false) do
+      case code.copy_paths do
         paths when is_list(paths) ->
           paths
 
@@ -71,46 +116,9 @@ defmodule FLAME.CodeSync do
           |> Enum.map(&to_string/1)
       end
 
-    compute_changes(%CodeSync{
-      id: System.unique_integer([:positive]),
-      copy_paths: copy_paths,
-      sync_beams: Keyword.get(opts, :sync_beams, []),
-      tmp_dir: Keyword.get(opts, :tmp_dir, {System, :tmp_dir!, []}),
-      extract_dir: Keyword.get(opts, :extract_dir, {Function, :identity, ["/"]}),
-      start_apps: Keyword.get(opts, :start_apps, true),
-      verbose: Keyword.get(opts, :verbose, false),
-      compress: Keyword.get(opts, :compress, false),
-      chunk_size: Keyword.get(opts, :chunk_size, 64_000)
-    })
-  end
-
-  def compute_changes(%CodeSync{} = code) do
-    copy_files = lookup_copy_files(code.copy_paths)
-    sync_beams_files = lookup_sync_beams_files(code.sync_beams)
-    all_paths = Enum.uniq(copy_files ++ sync_beams_files)
-
-    beam_hashes =
-      for path <- sync_beams_files,
-          into: %{},
-          do: {path, :erlang.md5(File.read!(path))}
-
-    apps_to_start =
-      case code.start_apps do
-        true ->
-          Enum.map(Application.started_applications(), fn {app, _desc, _vsn} -> app end)
-
-        false ->
-          []
-
-        apps when is_list(apps) ->
-          apps
-      end
-
     %CodeSync{
       code
-      | changed_paths: all_paths,
-        sync_beam_hashes: beam_hashes,
-        apps_to_start: apps_to_start
+      | changed_paths: Enum.uniq(code.changed_paths ++ lookup_copy_files(copy_paths))
     }
   end
 
@@ -119,7 +127,10 @@ defmodule FLAME.CodeSync do
   end
 
   def diff(%CodeSync{sync_beam_hashes: prev_hashes} = prev) do
-    current = compute_changes(%CodeSync{prev | copy_paths: []})
+    current =
+      prev
+      |> compute_start_apps()
+      |> compute_sync_beams()
 
     changed =
       for kv <- current.sync_beam_hashes,

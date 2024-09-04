@@ -508,7 +508,11 @@ defmodule FLAME.Runner do
 
   defp maybe_stream_code_paths(%{runner: %Runner{} = runner} = state) do
     if code_sync_opts = runner.code_sync_opts do
-      code_sync = CodeSync.new(Keyword.put(code_sync_opts, :copy_paths, []))
+      code_sync =
+        code_sync_opts
+        |> CodeSync.new()
+        |> CodeSync.compute_sync_beams()
+
       %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(code_sync)
       new_runner = %Runner{runner | code_sync: code_sync}
       {%{state | runner: new_runner}, parent_stream}
