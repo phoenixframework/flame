@@ -45,7 +45,7 @@ defmodule FLAME.Runner.MixProject do
     [
       {:jason, ">= 0.0.0", optional: true},
       {:castore, ">= 0.0.0", optional: true},
-      {:mox, "~> 1.1.0", only: :test},
+      {:mox, "~> 1.2.0", only: :test},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
   end

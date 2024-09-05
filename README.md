@@ -1,10 +1,17 @@
+# FlAME
+
+[![Hex.pm version](https://img.shields.io/hexpm/v/flame.svg)](https://hex.pm/packages/flame)
+[![Hex.pm downloads](https://img.shields.io/hexpm/dt/flame.svg)](https://hex.pm/packages/flame)
+[![Hex.pm weekly downloads](https://img.shields.io/hexpm/dw/flame.svg)](https://hex.pm/packages/flame)
+[![Hex.pm daily downloads](https://img.shields.io/hexpm/dd/flame.svg)](https://hex.pm/packages/flame)
+
 Imagine if we could auto scale simply by wrapping any existing app code in a function and have that block of code run in a temporary copy of the app.
 
 Enter the FLAME pattern.
 
 > FLAME - Fleeting Lambda Application for Modular Execution
 
-With FLAME, you treat your *entire application* as a lambda, where modular parts can be executed on short-lived infrastructure.
+With FLAME, you treat your _entire application_ as a lambda, where modular parts can be executed on short-lived infrastructure.
 
 Check the screencast to see it in action:
 
@@ -19,7 +26,7 @@ defp deps do
   [
     # For Erlang/OTP 26 and earlier, you also need Jason
     # {:jason, ">= 0.0.0"},
-    {:flame, "~> 0.2"}
+    {:flame, "~> 0.3"}
   ]
 end
 ```
@@ -54,12 +61,12 @@ def generate_thumbnails(%Video{} = vid, interval) do
 end
 ```
 
-Here we wrapped up our CPU expensive `ffmpeg` operation in a `FLAME.call/2`. FLAME accepts a function and any variables that the function closes over. In this example, the `%Video{}` struct and `interval` are passed along automatically. The work happens in a temporary copy of the app. We can do any work inside the FLAME call because we are running the *entire application*, database connection(s) and all.
+Here we wrapped up our CPU expensive `ffmpeg` operation in a `FLAME.call/2`. FLAME accepts a function and any variables that the function closes over. In this example, the `%Video{}` struct and `interval` are passed along automatically. The work happens in a temporary copy of the app. We can do any work inside the FLAME call because we are running the _entire application_, database connection(s) and all.
 
 `FLAME` provides the following interfaces for elastically scaled operations:
 
-  * `FLAME.call/3` - used for synchronous calls
-  * `FLAME.cast/3` - used for async casts where you don't need to wait on the results
-  * `FLAME.place_child/3` – used for placing a child spec somewhere to run, in place of `DynamicSupervisor.start_child`, `Task.Supervisor.start_child`, etc
+- `FLAME.call/3` - used for synchronous calls
+- `FLAME.cast/3` - used for async casts where you don't need to wait on the results
+- `FLAME.place_child/3` – used for placing a child spec somewhere to run, in place of `DynamicSupervisor.start_child`, `Task.Supervisor.start_child`, etc
 
 The `FLAME.Pool` handles elastically scaling runners up and down, as well as remote monitoring of resources. Check the moduledoc for example usage.
