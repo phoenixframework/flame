@@ -132,12 +132,12 @@ defmodule FLAME.Runner do
       end)
 
     case result do
-      {:ok, value} ->
-        :ok = checkin(runner_pid, ref)
-        value
+      {:ok, {value, trackable_pids}} ->
+        :ok = checkin(runner_pid, ref, trackable_pids)
+        {value, trackable_pids}
 
       {kind, reason} ->
-        :ok = checkin(runner_pid, ref)
+        :ok = checkin(runner_pid, ref, [])
 
         case kind do
           :exit -> exit(reason)
@@ -151,8 +151,8 @@ defmodule FLAME.Runner do
     GenServer.call(runner_pid, :checkout)
   end
 
-  defp checkin(runner_pid, ref) do
-    GenServer.call(runner_pid, {:checkin, ref})
+  defp checkin(runner_pid, ref, trackable_pids) do
+    GenServer.call(runner_pid, {:checkin, ref, trackable_pids})
   end
 
   @impl true
@@ -253,8 +253,6 @@ defmodule FLAME.Runner do
   end
 
   def handle_call(:checkout, {from_pid, _tag}, state) do
-    ref = Process.monitor(from_pid)
-
     state =
       case maybe_diff_code_paths(state) do
         {new_state, nil} ->
@@ -270,12 +268,20 @@ defmodule FLAME.Runner do
           new_state
       end
 
-    {:reply, {ref, state.runner, state.backend_state}, put_checkout(state, from_pid, ref)}
+    {new_state, ref} = put_checkout(state, from_pid)
+    {:reply, {ref, new_state.runner, new_state.backend_state}, new_state}
   end
 
-  def handle_call({:checkin, ref}, _from, state) do
+  def handle_call({:checkin, ref, trackable_pids}, _from, state) do
     Process.demonitor(ref, [:flush])
-    {:reply, :ok, drop_checkout(state, ref)}
+
+    new_state =
+      Enum.reduce(trackable_pids, state, fn pid, acc ->
+        {acc, _ref} = put_checkout(acc, pid)
+        acc
+      end)
+
+    {:reply, :ok, drop_checkout(new_state, ref)}
   end
 
   def handle_call({:remote_boot, base_sync_stream, _timeout}, _from, state) do
@@ -301,7 +307,7 @@ defmodule FLAME.Runner do
                 terminator: term
               } = new_runner
 
-              :ok =
+              {:ok, _} =
                 remote_call!(runner, new_backend_state, runner.boot_timeout, false, fn ->
                   # ensure app is fully started if parent connects before up
                   if otp_app, do: {:ok, _} = Application.ensure_all_started(otp_app)
@@ -407,8 +413,9 @@ defmodule FLAME.Runner do
     result
   end
 
-  defp put_checkout(state, from_pid, ref) when is_pid(from_pid) do
-    %{state | checkouts: Map.put(state.checkouts, ref, from_pid)}
+  defp put_checkout(state, from_pid) when is_pid(from_pid) do
+    ref = Process.monitor(from_pid)
+    {%{state | checkouts: Map.put(state.checkouts, ref, from_pid)}, ref}
   end
 
   defp drop_checkout(state, ref) when is_reference(ref) do
@@ -463,9 +470,9 @@ defmodule FLAME.Runner do
         if track_resources? do
           {result, pids} = FLAME.track_resources(result, [], node(remote_pid))
           send(remote_pid, {parent_ref, pids})
-          {:ok, result}
+          {:ok, {result, pids}}
         else
-          {:ok, result}
+          {:ok, {result, []}}
         end
 
       {:DOWN, ^remote_monitor_ref, :process, ^remote_pid, reason} ->

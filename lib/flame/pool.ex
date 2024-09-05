@@ -289,13 +289,13 @@ defmodule FLAME.Pool do
         |> Keyword.put_new(:link, true)
 
       case Runner.place_child(runner_pid, child_spec, place_opts) do
-        {:ok, child_pid} = result ->
+        {{:ok, child_pid}, _trackable_pids = []} = result ->
           # we are placing the link back on the parent node, but we are protected
           # from racing the link on the child FLAME because the terminator on
           # the remote flame is monitoring the caller and will terminator the child
           # if we go away
           if Keyword.fetch!(place_opts, :link), do: Process.link(child_pid)
-          {:cancel, {:replace, child_pid}, result}
+          {:cancel, {:replace, [child_pid]}, result}
 
         :ignore ->
           {:cancel, :ok, :ignore}
@@ -330,7 +330,11 @@ defmodule FLAME.Pool do
             send_cancel(pid, ref, :catch)
             :erlang.raise(kind, reason, __STACKTRACE__)
         else
-          {:cancel, reason, result} ->
+          {:cancel, :ok, {result, [_ | _] = trackable_pids}} ->
+            send_cancel(pid, ref, {:replace, trackable_pids})
+            result
+
+          {:cancel, reason, {result, [] = _trackable_pids}} ->
             send_cancel(pid, ref, reason)
             result
         end
@@ -481,8 +485,8 @@ defmodule FLAME.Pool do
 
   def handle_info({:cancel, ref, caller_pid, reason}, state) do
     case reason do
-      {:replace, child_pid} ->
-        {:noreply, replace_caller(state, ref, caller_pid, child_pid)}
+      {:replace, child_pids} ->
+        {:noreply, replace_caller(state, ref, caller_pid, child_pids)}
 
       reason when reason in [:ok, :timeout, :catch] ->
         {:noreply, checkin_runner(state, ref, caller_pid, reason)}
@@ -511,23 +515,30 @@ defmodule FLAME.Pool do
     end
   end
 
-  defp replace_caller(state, checkout_ref, caller_pid, child_pid) do
-    # replace caller with child pid and do not inc concurrency counts since we are replacing
+  defp replace_caller(%Pool{} = state, checkout_ref, caller_pid, [_ | _] = child_pids) do
+    # replace caller with child pids and increase concurrency counts for the runner
     %{^caller_pid => %Caller{checkout_ref: ^checkout_ref} = caller} = state.callers
     Process.demonitor(caller.monitor_ref, [:flush])
 
-    new_caller = %Caller{
-      checkout_ref: checkout_ref,
-      monitor_ref: Process.monitor(child_pid),
-      runner_ref: caller.runner_ref
-    }
+    new_callers = Map.delete(state.callers, caller_pid)
 
     new_callers =
-      state.callers
-      |> Map.delete(caller_pid)
-      |> Map.put(child_pid, new_caller)
+      Enum.reduce(child_pids, new_callers, fn child_pid, acc ->
+        new_caller = %Caller{
+          checkout_ref: checkout_ref,
+          monitor_ref: Process.monitor(child_pid),
+          runner_ref: caller.runner_ref
+        }
 
-    %Pool{state | callers: new_callers}
+        Map.put(acc, child_pid, new_caller)
+      end)
+
+    inc_runner_count(
+      %Pool{state | callers: new_callers},
+      caller.runner_ref,
+      # subtract 1 because the caller we are replacing is already in the count
+      length(child_pids) - 1
+    )
   end
 
   defp checkin_runner(state, ref, caller_pid, reason)
@@ -677,10 +688,10 @@ defmodule FLAME.Pool do
     {runner, new_state}
   end
 
-  defp inc_runner_count(%Pool{} = state, ref) do
+  defp inc_runner_count(%Pool{} = state, ref, amount \\ 1) do
     new_runners =
       Map.update!(state.runners, ref, fn %RunnerState{} = runner ->
-        %RunnerState{runner | count: runner.count + 1}
+        %RunnerState{runner | count: runner.count + amount}
       end)
 
     %Pool{state | runners: new_runners}
