@@ -311,7 +311,7 @@ defmodule FLAME.Pool do
     %{boot_timeout: boot_timeout, track_resources: track_resources} = lookup_meta(name)
     timeout = opts[:timeout] || boot_timeout
     track_resources = Keyword.get(opts, :track_resources, track_resources)
-    pid = Process.whereis(name) || exit!(:noproc, fun_name, args)
+    pid = Process.whereis(name) || exit({:noproc, {__MODULE__, fun_name, args}})
     ref = Process.monitor(pid)
     {start_time, deadline} = deadline(timeout)
 
@@ -341,20 +341,18 @@ defmodule FLAME.Pool do
         end
 
       {:DOWN, ^ref, _, _, reason} ->
-        exit!(reason, fun_name, args)
+        exit({reason, {__MODULE__, fun_name, args}})
     after
       timeout ->
         send_cancel(pid, ref, :timeout)
         Process.demonitor(ref, [:flush])
-        exit!(:timeout, fun_name, args)
+        exit({:timeout, {__MODULE__, fun_name, args}})
     end
   end
 
   defp send_cancel(pid, ref, reason) when is_pid(pid) and is_reference(ref) do
     send(pid, {:cancel, ref, self(), reason})
   end
-
-  defp exit!(reason, fun, args), do: exit({reason, {__MODULE__, fun, args}})
 
   defp remaining_timeout(opts, mono_start) do
     case Keyword.fetch(opts, :timeout) do
