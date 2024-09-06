@@ -56,7 +56,7 @@ defmodule FLAME.CodeSync do
       extract_dir: Keyword.get(opts, :extract_dir, {Function, :identity, ["/"]}),
       start_apps: Keyword.get(opts, :start_apps, true),
       verbose: Keyword.get(opts, :verbose, false),
-      compress: Keyword.get(opts, :compress, false),
+      compress: Keyword.get(opts, :compress, true),
       chunk_size: Keyword.get(opts, :chunk_size, 64_000)
     })
   end

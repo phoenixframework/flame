@@ -102,6 +102,7 @@ defmodule FLAME.Pool do
 
     * `:timeout` - The time to allow functions to execute on a remote node. Defaults to 30 seconds.
       This value is also used as the default `FLAME.call/3` timeout for the caller.
+
     * `:boot_timeout` - The time to allow for booting and connecting to a remote node.
       Defaults to 30 seconds.
 
