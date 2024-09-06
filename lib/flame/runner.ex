@@ -49,7 +49,7 @@ defmodule FLAME.Runner do
             backend_init: nil,
             node_name: nil,
             single_use: false,
-            timeout: 20_000,
+            timeout: 30_000,
             status: nil,
             log: :info,
             boot_timeout: 10_000,
@@ -118,11 +118,10 @@ defmodule FLAME.Runner do
   def call(runner_pid, caller_pid, func, opts \\ [])
       when is_pid(runner_pid) and is_pid(caller_pid) and is_function(func) and is_list(opts) do
     link? = Keyword.get(opts, :link, true)
-    timeout = opts[:timeout] || nil
     track_resources? = Keyword.get(opts, :track_resources, false)
     {ref, %Runner{} = runner, backend_state} = checkout(runner_pid)
     %Runner{terminator: terminator} = runner
-    call_timeout = timeout || runner.timeout
+    call_timeout = opts[:timeout] || runner.timeout
 
     result =
       remote_call(runner, backend_state, call_timeout, track_resources?, fn ->

@@ -285,8 +285,8 @@ defmodule FLAME.Pool do
                                                                             track_resources ->
       place_opts =
         opts
-        |> Keyword.put(:timeout, opts[:timeout] || remaining_timeout)
         |> Keyword.put(:track_resources, track_resources)
+        |> Keyword.put_new(:timeout, remaining_timeout)
         |> Keyword.put_new(:link, true)
 
       case Runner.place_child(runner_pid, child_spec, place_opts) do
