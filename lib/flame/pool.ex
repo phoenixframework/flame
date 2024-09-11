@@ -146,29 +146,33 @@ defmodule FLAME.Pool do
     * `:code_sync` – The optional list of options to enable copying and syncing code paths
       from the parent node to the runner node. Disabled by default. The options are:
 
-      * `:copy_paths` – If `true`, the pool will copy the code paths from the parent node
-        to the runner node on boot. Then any subsequent FLAME operation will sync code paths
-        from parent to child. Useful when you are starting an image that needs to run
-        dynamic code that is not available on the runner node. Defaults to `false`.
+      * `:start_apps` – Either a boolean or a list of specific OTP application names to start
+        when the runner boots. When `true`, all applications currently running on the parent node
+        are sent to the runner node to be started. Defaults to `false`. When set to `true`,
+        `copy_apps` will also be set to `true` if not explicitly set to `false`.
+
+      * `:copy_apps` – The boolean flag to copy all the application artifacts and their beam
+        files from the parent node to the runner node on boot. Defaults `false`.
+        When passing `start_apps: true`, automatically sets `copy_paths: true`.
+
+      * `:copy_paths` – The list of arbitrary paths to copy from the parent node to the runner
+        node on boot. Defaults to `[]`.
 
       * `:sync_beams` – A list of specific beam code paths to sync to the runner node. Useful
         when you want to sync specific beam code paths from the parent after sending all code
-        paths from `:copy_paths` on initial boot. For example, with `copy_paths: true`,
+        paths from `:copy_apps` on initial boot. For example, with `copy_apps: true`,
         and `sync_beams: ["/home/app/.cache/.../ebin"]`, all the code from the parent will be
         copied on boot, but only the specific beam files will be synced on subsequent calls.
-        With `copy_paths: false`, and `sync_beams: ["/home/app/.cache/.../ebin"]`,
+        With `copy_apps: false`, and `sync_beams: ["/home/app/.cache/.../ebin"]`,
         only the specific beam files will be synced on boot and for subsequent calls.
         Defaults to `[]`.
-
-      * `:start_apps` – Either a boolean or a list of specific OTP application names to start
-        when the runner boots. When `true`, all applications currently running on the parent node
-        are sent to the runner node to be started. Defaults to `false`.
 
       * `:verbose` – If `true`, the pool will log verbose information about the code sync process.
         Defaults to `false`.
 
-      * `:compress` – If `true`, the copy_paths and sync_beams will be compressed before sending.
-        Provides savings in network payload size at the cost of CPU time. Defaults to `false`.
+      * `:compress` – If `true`, the copy_apps, copy_paths, and sync_beams will be compressed
+        before sending. Provides savings in network payload size at the cost of CPU time.
+        Defaults to `true`.
 
       For example, in [Livebook](https://livebook.dev/), to start a pool with code sync enabled:
 
@@ -179,7 +183,6 @@ defmodule FLAME.Pool do
               name: :my_flame,
               code_sync: [
                 start_apps: true,
-                copy_paths: true,
                 sync_beams: [Path.join(System.tmp_dir!(), "livebook_runtime")]
               ],
               min: 1,
@@ -219,6 +222,7 @@ defmodule FLAME.Pool do
     ])
 
     Keyword.validate!(opts[:code_sync] || [], [
+      :copy_apps,
       :copy_paths,
       :sync_beams,
       :start_apps,
@@ -408,7 +412,7 @@ defmodule FLAME.Pool do
         code_sync =
           code_sync_opts
           |> CodeSync.new()
-          |> CodeSync.compute_copy_paths()
+          |> CodeSync.compute_changed_paths()
 
         %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(code_sync)
         parent_stream
