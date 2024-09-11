@@ -348,6 +348,8 @@ defmodule FLAME.Runner do
       ])
 
     Keyword.validate!(opts[:code_sync] || [], [
+      :get_path,
+      :copy_apps,
       :copy_paths,
       :sync_beams,
       :start_apps,
