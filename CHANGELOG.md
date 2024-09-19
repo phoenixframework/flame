@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1 (2024-09-19)
+
+### Enhancements
+- Add basic rate limiting retries to the FlyBackend to abide by Fly's rate limits of 1 request per second, with 3 requests per second burst.
+
 ## 0.5.0 (2024-09-11)
 
 ### Enhancements

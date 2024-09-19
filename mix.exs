@@ -4,7 +4,7 @@ defmodule FLAME.Runner.MixProject do
   def project do
     [
       app: :flame,
-      version: "0.5.0",
+      version: "0.5.1",
       elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
