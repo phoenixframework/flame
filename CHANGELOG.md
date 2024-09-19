@@ -4,6 +4,7 @@
 
 ### Enhancements
 - Add basic rate limiting retries to the FlyBackend to abide by Fly's rate limits of 1 request per second, with 3 requests per second burst.
+- Add basic retries for `no capacity` errors in the FlyBackend
 
 ## 0.5.0 (2024-09-11)
 

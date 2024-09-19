@@ -364,7 +364,11 @@ defmodule FLAME.FlyBackend do
       {:ok, {{_, 200, _}, _, response_body}} ->
         JSON.decode!(response_body)
 
-      {:ok, {{_, 429, _}, _, _response_body}} when remaining_tries > 0 ->
+      # 429 Too Many Requests (rate limited)
+      # 412 Precondition Failed (can't find capacity)
+      # 409 Conflict (the flyd tried ending up not having capacity)
+      # 422 Unprocessable Entity (could not find capcity for volume workloads)
+      {:ok, {{_, status, _}, _, _response_body}} when status in [429, 412, 409, 422] and remaining_tries > 0 ->
         Process.sleep(1000)
         http_post!(url, remaining_tries - 1, opts)
 
