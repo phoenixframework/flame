@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.5.1 (2024-09-19)
+
+### Enhancements
+- Add basic rate limiting retries to the FlyBackend to abide by Fly's rate limits of 1 request per second, with 3 requests per second burst.
+- Add basic retries for `no capacity` errors in the FlyBackend
+
+## 0.5.0 (2024-09-11)
+
+### Enhancements
+- Add `copy_apps` option to `code_sync` to copy all apps in the code path, which is
+  set to true when `start_apps` is true.
+- Support `copy_paths` for arbitrary paths unrelated to beams apps for copying arbitrary
+  files on boot to the runner.
+
+### Deprecations
+- `copy_paths: true` has been deprecated in favor of `start_apps: true`, to copy
+  all apps and start them. You can also pass `copy_paths: true` to copy all apps
+  without starting them. Now `copy_paths` is reserved for copying arbitrary paths
+  unrelated to beams apps.
+
+## 0.4.4 (2024-09-03)
+
+### Bug Fixes
+- Fix idle shutdown running before code sync, causing long code syncs to shut runners down prematurely
+
+## 0.4.3 (2024-09-02)
+
+### Bug Fixes
+- Fix `:compress` to `:code_sync` raise invalid option error
+
 ## 0.4.2 (2024-08-27)
 
 ### Enhancements

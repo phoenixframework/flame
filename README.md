@@ -19,7 +19,7 @@ defp deps do
   [
     # For Erlang/OTP 26 and earlier, you also need Jason
     # {:jason, ">= 0.0.0"},
-    {:flame, "~> 0.2"}
+    {:flame, "~> 0.5"}
   ]
 end
 ```

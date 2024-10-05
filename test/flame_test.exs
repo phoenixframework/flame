@@ -543,5 +543,80 @@ defmodule FLAME.FLAMETest do
       send(pid, {trackable.ref, :stop})
       assert_receive {:DOWN, _, _, ^runner, {:shutdown, :idle}}, 1000
     end
+
+    @tag runner: [
+           min: 0,
+           max: 1,
+           max_concurrency: 1,
+           idle_shutdown_after: 100,
+           track_resources: true
+         ]
+    test "remote with tracking max concurrency", %{runner_sup: runner_sup} = config do
+      non_trackable = URI.new!("/")
+
+      call = fn count ->
+        ref = make_ref()
+
+        trackables =
+          for _ <- 1..count,
+              do: %MyTrackable{
+                name: :"#{config.test}_trackable_#{System.unique_integer()}",
+                ref: ref
+              }
+
+        [{%{"yes" => trackables, "no" => non_trackable}}]
+      end
+
+      [{map}] = FLAME.call(config.test, fn -> call.(2) end)
+
+      assert [{:undefined, runner, :worker, [FLAME.Runner]}] =
+               Supervisor.which_children(runner_sup)
+
+      Process.monitor(runner)
+      assert map_size(map) == 2
+      assert ^non_trackable = map["no"]
+      assert [%MyTrackable{} = trackable1, %MyTrackable{} = trackable2] = map["yes"]
+
+      # original trackables still occupies the slots
+      assert Process.alive?(trackable1.pid)
+      assert Process.alive?(trackable2.pid)
+      refute_receive {:DOWN, _, _, ^runner, _}, 1000
+
+      # check in the trackable 1
+      send(trackable1.pid, {trackable1.ref, :stop})
+
+      # no idle down because second trackable still alive
+      refute_receive {:DOWN, _, _, ^runner, _}, 1000
+
+      # trackable2 occupies the only available slot, so next call times out
+      caught =
+        try do
+          FLAME.call(config.test, fn -> call.(1) end, timeout: 1000)
+        catch
+          kind, reason -> {kind, reason}
+        end
+
+      assert {:exit, {:timeout, _}} = caught
+
+      # check in the trackable 2
+      send(trackable2.pid, {trackable2.ref, :stop})
+
+      # runner is now free for more work on open slot
+      [{map}] = FLAME.call(config.test, fn -> call.(1) end)
+
+      assert [{:undefined, runner, :worker, [FLAME.Runner]}] =
+               Supervisor.which_children(runner_sup)
+
+      Process.monitor(runner)
+      assert map_size(map) == 2
+      assert ^non_trackable = map["no"]
+      assert [%MyTrackable{pid: pid} = trackable] = map["yes"]
+
+      # check in the trackable
+      send(pid, {trackable.ref, :stop})
+
+      # runner idles down
+      assert_receive {:DOWN, _, _, ^runner, {:shutdown, :idle}}, 1000
+    end
   end
 end

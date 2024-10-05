@@ -18,7 +18,11 @@ defmodule FLAME.CodeSyncTest do
   describe "new/0" do
     test "creates a new struct with change tracking" do
       mock = CodeSyncMock.new()
-      code_sync = CodeSync.new(mock.opts)
+
+      code_sync =
+        mock.opts
+        |> CodeSync.new()
+        |> CodeSync.compute_changed_paths()
 
       assert %CodeSync{
                sync_beam_hashes: %{},
@@ -38,7 +42,12 @@ defmodule FLAME.CodeSyncTest do
 
   test "identifies changed, added, and deleted beams" do
     mock = CodeSyncMock.new()
-    previous = CodeSync.new(mock.opts)
+
+    previous =
+      mock.opts
+      |> CodeSync.new()
+      |> CodeSync.compute_sync_beams()
+
     # simulate change to mod1, new mod3, and deleted mod2
     :ok = CodeSyncMock.simulate_changes(mock)
 
@@ -89,10 +98,15 @@ defmodule FLAME.CodeSyncTest do
     assert current.apps_to_start == []
   end
 
-  test "packages and extracts packaged code and starts apps by default" do
+  test "compute_changed_paths packages and extracts packaged code and starts apps" do
     assert :logger in started_apps()
     mock = CodeSyncMock.new()
-    code = CodeSync.new(mock.opts)
+
+    code =
+      mock.opts
+      |> CodeSync.new()
+      |> CodeSync.compute_changed_paths()
+
     assert %FLAME.CodeSync.PackagedStream{} = pkg = CodeSync.package_to_stream(code)
     assert File.exists?(pkg.stream.path)
 

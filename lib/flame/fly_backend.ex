@@ -135,6 +135,8 @@ defmodule FLAME.FlyBackend do
             runner_node_name: nil,
             log: nil
 
+  @retry 10
+
   @valid_opts [
     :app,
     :region,
@@ -253,7 +255,7 @@ defmodule FLAME.FlyBackend do
   def remote_boot(%FlyBackend{parent_ref: parent_ref} = state) do
     {resp, req_connect_time} =
       with_elapsed_ms(fn ->
-        http_post!("#{state.host}/v1/apps/#{state.app}/machines",
+        http_post!("#{state.host}/v1/apps/#{state.app}/machines", @retry,
           content_type: "application/json",
           headers: [
             {"Content-Type", "application/json"},
@@ -333,7 +335,7 @@ defmodule FLAME.FlyBackend do
     |> binary_part(0, len)
   end
 
-  defp http_post!(url, opts) do
+  defp http_post!(url, remaining_tries, opts) do
     Keyword.validate!(opts, [:headers, :body, :connect_timeout, :content_type])
 
     headers =
@@ -361,6 +363,15 @@ defmodule FLAME.FlyBackend do
          ) do
       {:ok, {{_, 200, _}, _, response_body}} ->
         JSON.decode!(response_body)
+
+      # 429 Too Many Requests (rate limited)
+      # 412 Precondition Failed (can't find capacity)
+      # 409 Conflict (the flyd tried ending up not having capacity)
+      # 422 Unprocessable Entity (could not find capcity for volume workloads)
+      {:ok, {{_, status, _}, _, _response_body}}
+      when status in [429, 412, 409, 422] and remaining_tries > 0 ->
+        Process.sleep(1000)
+        http_post!(url, remaining_tries - 1, opts)
 
       {:ok, {{_, status, reason}, _, resp_body}} ->
         raise "failed POST #{url} with #{inspect(status)} (#{inspect(reason)}): #{inspect(resp_body)} #{inspect(headers)}"

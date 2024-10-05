@@ -102,6 +102,7 @@ defmodule FLAME.Pool do
 
     * `:timeout` - The time to allow functions to execute on a remote node. Defaults to 30 seconds.
       This value is also used as the default `FLAME.call/3` timeout for the caller.
+
     * `:boot_timeout` - The time to allow for booting and connecting to a remote node.
       Defaults to 30 seconds.
 
@@ -145,29 +146,33 @@ defmodule FLAME.Pool do
     * `:code_sync` – The optional list of options to enable copying and syncing code paths
       from the parent node to the runner node. Disabled by default. The options are:
 
-      * `:copy_paths` – If `true`, the pool will copy the code paths from the parent node
-        to the runner node on boot. Then any subsequent FLAME operation will sync code paths
-        from parent to child. Useful when you are starting an image that needs to run
-        dynamic code that is not available on the runner node. Defaults to `false`.
+      * `:start_apps` – Either a boolean or a list of specific OTP application names to start
+        when the runner boots. When `true`, all applications currently running on the parent node
+        are sent to the runner node to be started. Defaults to `false`. When set to `true`,
+        `copy_apps` will also be set to `true` if not explicitly set to `false`.
+
+      * `:copy_apps` – The boolean flag to copy all the application artifacts and their beam
+        files from the parent node to the runner node on boot. Defaults `false`.
+        When passing `start_apps: true`, automatically sets `copy_paths: true`.
+
+      * `:copy_paths` – The list of arbitrary paths to copy from the parent node to the runner
+        node on boot. Defaults to `[]`.
 
       * `:sync_beams` – A list of specific beam code paths to sync to the runner node. Useful
         when you want to sync specific beam code paths from the parent after sending all code
-        paths from `:copy_paths` on initial boot. For example, with `copy_paths: true`,
+        paths from `:copy_apps` on initial boot. For example, with `copy_apps: true`,
         and `sync_beams: ["/home/app/.cache/.../ebin"]`, all the code from the parent will be
         copied on boot, but only the specific beam files will be synced on subsequent calls.
-        With `copy_paths: false`, and `sync_beams: ["/home/app/.cache/.../ebin"]`,
+        With `copy_apps: false`, and `sync_beams: ["/home/app/.cache/.../ebin"]`,
         only the specific beam files will be synced on boot and for subsequent calls.
         Defaults to `[]`.
-
-      * `:start_apps` – Either a boolean or a list of specific OTP application names to start
-        when the runner boots. When `true`, all applications currently running on the parent node
-        are sent to the runner node to be started. Defaults to `false`.
 
       * `:verbose` – If `true`, the pool will log verbose information about the code sync process.
         Defaults to `false`.
 
-      * `:compress` – If `true`, the copy_paths and sync_beams will be compressed before sending.
-        Provides savings in network payload size at the cost of CPU time. Defaults to `false`.
+      * `:compress` – If `true`, the copy_apps, copy_paths, and sync_beams will be compressed
+        before sending. Provides savings in network payload size at the cost of CPU time.
+        Defaults to `true`.
 
       For example, in [Livebook](https://livebook.dev/), to start a pool with code sync enabled:
 
@@ -178,7 +183,6 @@ defmodule FLAME.Pool do
               name: :my_flame,
               code_sync: [
                 start_apps: true,
-                copy_paths: true,
                 sync_beams: [Path.join(System.tmp_dir!(), "livebook_runtime")]
               ],
               min: 1,
@@ -218,11 +222,13 @@ defmodule FLAME.Pool do
     ])
 
     Keyword.validate!(opts[:code_sync] || [], [
+      :copy_apps,
       :copy_paths,
       :sync_beams,
       :start_apps,
       :verbose,
-      :compress
+      :compress,
+      :chunk_size
     ])
 
     GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
@@ -283,18 +289,18 @@ defmodule FLAME.Pool do
                                                                             track_resources ->
       place_opts =
         opts
-        |> Keyword.put(:timeout, opts[:timeout] || remaining_timeout)
         |> Keyword.put(:track_resources, track_resources)
+        |> Keyword.put_new(:timeout, remaining_timeout)
         |> Keyword.put_new(:link, true)
 
       case Runner.place_child(runner_pid, child_spec, place_opts) do
-        {:ok, child_pid} = result ->
+        {{:ok, child_pid}, _trackable_pids = []} = result ->
           # we are placing the link back on the parent node, but we are protected
           # from racing the link on the child FLAME because the terminator on
           # the remote flame is monitoring the caller and will terminator the child
           # if we go away
           if Keyword.fetch!(place_opts, :link), do: Process.link(child_pid)
-          {:cancel, {:replace, child_pid}, result}
+          {:cancel, {:replace, [child_pid]}, result}
 
         :ignore ->
           {:cancel, :ok, :ignore}
@@ -309,7 +315,7 @@ defmodule FLAME.Pool do
     %{boot_timeout: boot_timeout, track_resources: track_resources} = lookup_meta(name)
     timeout = opts[:timeout] || boot_timeout
     track_resources = Keyword.get(opts, :track_resources, track_resources)
-    pid = Process.whereis(name) || exit!(:noproc, fun_name, args)
+    pid = Process.whereis(name) || exit({:noproc, {__MODULE__, fun_name, args}})
     ref = Process.monitor(pid)
     {start_time, deadline} = deadline(timeout)
 
@@ -329,26 +335,28 @@ defmodule FLAME.Pool do
             send_cancel(pid, ref, :catch)
             :erlang.raise(kind, reason, __STACKTRACE__)
         else
-          {:cancel, reason, result} ->
+          {:cancel, :ok, {result, [_ | _] = trackable_pids}} ->
+            send_cancel(pid, ref, {:replace, trackable_pids})
+            result
+
+          {:cancel, reason, {result, [] = _trackable_pids}} ->
             send_cancel(pid, ref, reason)
             result
         end
 
       {:DOWN, ^ref, _, _, reason} ->
-        exit!(reason, fun_name, args)
+        exit({reason, {__MODULE__, fun_name, args}})
     after
       timeout ->
         send_cancel(pid, ref, :timeout)
         Process.demonitor(ref, [:flush])
-        exit!(:timeout, fun_name, args)
+        exit({:timeout, {__MODULE__, fun_name, args}})
     end
   end
 
   defp send_cancel(pid, ref, reason) when is_pid(pid) and is_reference(ref) do
     send(pid, {:cancel, ref, self(), reason})
   end
-
-  defp exit!(reason, fun, args), do: exit({reason, {__MODULE__, fun, args}})
 
   defp remaining_timeout(opts, mono_start) do
     case Keyword.fetch(opts, :timeout) do
@@ -401,7 +409,11 @@ defmodule FLAME.Pool do
 
     base_sync_stream =
       if code_sync_opts = opts[:code_sync] do
-        code_sync = CodeSync.new(Keyword.put(code_sync_opts, :sync_beams, []))
+        code_sync =
+          code_sync_opts
+          |> CodeSync.new()
+          |> CodeSync.compute_changed_paths()
+
         %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(code_sync)
         parent_stream
       end
@@ -476,8 +488,8 @@ defmodule FLAME.Pool do
 
   def handle_info({:cancel, ref, caller_pid, reason}, state) do
     case reason do
-      {:replace, child_pid} ->
-        {:noreply, replace_caller(state, ref, caller_pid, child_pid)}
+      {:replace, child_pids} ->
+        {:noreply, replace_caller(state, ref, caller_pid, child_pids)}
 
       reason when reason in [:ok, :timeout, :catch] ->
         {:noreply, checkin_runner(state, ref, caller_pid, reason)}
@@ -506,10 +518,38 @@ defmodule FLAME.Pool do
     end
   end
 
-  defp replace_caller(state, checkout_ref, caller_pid, child_pid) do
+  defp await_downs(child_pids) do
+    if MapSet.size(child_pids) == 0 do
+      :ok
+    else
+      receive do
+        {:DOWN, _ref, :process, pid, _reason} -> await_downs(MapSet.delete(child_pids, pid))
+      end
+    end
+  end
+
+  defp replace_caller(%Pool{} = state, checkout_ref, caller_pid, [_ | _] = child_pids) do
     # replace caller with child pid and do not inc concurrency counts since we are replacing
     %{^caller_pid => %Caller{checkout_ref: ^checkout_ref} = caller} = state.callers
     Process.demonitor(caller.monitor_ref, [:flush])
+
+    # if we have more than 1 child pid, such as for multiple trackables returned for a single
+    # call, we monitor all of them under a new process and the new process takes the slot in the
+    # pool. When all trackables are finished, the new process goes down and frees the slot.
+    child_pid =
+      case child_pids do
+        [child_pid] ->
+          child_pid
+
+        [_ | _] ->
+          {:ok, child_pid} =
+            Task.Supervisor.start_child(state.task_sup, fn ->
+              Enum.each(child_pids, &Process.monitor(&1))
+              await_downs(MapSet.new(child_pids))
+            end)
+
+          child_pid
+      end
 
     new_caller = %Caller{
       checkout_ref: checkout_ref,
