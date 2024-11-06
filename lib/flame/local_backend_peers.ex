@@ -4,19 +4,20 @@ defmodule FLAME.LocalPeerBackend do
   """
 
   @behaviour FLAME.Backend
+  alias FLAME.LocalPeerBackend
 
-  defstruct [runner_node_name: nil]
-
+  defstruct runner_node_name: nil,
+    parent_ref: nil
 
   @valid_opts []
 
   @impl true
   def init(opts) do
-    # I need to instantiate %LocalBackend, reading partly from Application.get_env
+    # I need to instantiate %LocalPeerBackend, reading partly from Application.get_env
     # I also need to handle the terminator
     # NB: `opts` is passed in by the runner
     conf = Application.get_env(:flame, __MODULE__) || []
-    default = %LocalBackend{
+    default = %LocalPeerBackend{
       runner_node_name: ""
     }
 
@@ -25,7 +26,7 @@ defmodule FLAME.LocalPeerBackend do
       |> Keyword.merge(opts)
       |> Keyword.validate!(@valid_opts)
 
-    %LocalBackend{} = state = Map.merge(default, Map.new(provided_opts))
+    %LocalPeerBackend{} = state = Map.merge(default, Map.new(provided_opts))
 
     defaults =
       Application.get_env(:flame, __MODULE__) || []
@@ -39,7 +40,7 @@ defmodule FLAME.LocalPeerBackend do
   end
 
   @impl true
-  def remote_spawn_monitor(%LocalBackend{} = _state, term) do
+  def remote_spawn_monitor(%LocalPeerBackend{} = _state, term) do
     case term do
       func when is_function(func, 0) ->
         {pid, ref} = spawn_monitor(func)
@@ -47,7 +48,7 @@ defmodule FLAME.LocalPeerBackend do
 
       {mod, fun, args} when is_atom(mod) and is_atom(fun) and is_list(args) ->
         {pid, ref} = spawn_monitor(mod, fun, args)
-        {:ok, {pid, eref}}
+        {:ok, {pid, ref}}
 
       other ->
         raise ArgumentError,
@@ -64,7 +65,7 @@ defmodule FLAME.LocalPeerBackend do
   end
 
   @impl true
-  def remote_boot(%LocalBackend{parent_ref: parent_ref} = state) do
+  def remote_boot(%LocalPeerBackend{parent_ref: parent_ref} = state) do
     parent = FLAME.Parent.new(make_ref(), self(), __MODULE__, "peer_", nil)
     name = Module.concat(state.terminator_sup, to_string(System.unique_integer([:positive])))
     opts = [name: name, parent: parent, log: state.log] # extend to include the code paths, using
