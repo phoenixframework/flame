@@ -64,9 +64,18 @@ defmodule FLAME.LocalPeerBackend do
     System.stop()
   end
 
+
+
+
+  @doc"""
+  state.terminator_sup -- what is this, and how do we adapt it for this case
+  the terminator is what calls back to the parent. how is the terminator passed in t
+  """
   @impl true
   def remote_boot(%LocalPeerBackend{parent_ref: parent_ref} = state) do
     parent = FLAME.Parent.new(make_ref(), self(), __MODULE__, "peer_", nil)
+
+    # module.concat
     name = Module.concat(state.terminator_sup, to_string(System.unique_integer([:positive])))
     opts = [name: name, parent: parent, log: state.log] # extend to include the code paths, using
 
@@ -74,10 +83,12 @@ defmodule FLAME.LocalPeerBackend do
     {:ok, _sup_pid} = DynamicSupervisor.start_child(state.terminator_sup, spec)
 
     case Process.whereis(name) do
+      # this tells us which process has the termination genserver for this worker
       terminator_pid when is_pid(terminator_pid) -> {:ok, terminator_pid, state}
     end
   end
 
+  @spec remote_boot_old(any()) :: {:ok, pid(), any()}
   def remote_boot_old(state) do
     parent = FLAME.Parent.new(make_ref(), self(), __MODULE__, "nonode", nil)
     name = Module.concat(state.terminator_sup, to_string(System.unique_integer([:positive])))

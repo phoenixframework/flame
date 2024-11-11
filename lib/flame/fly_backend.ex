@@ -305,8 +305,11 @@ defmodule FLAME.FlyBackend do
               runner_private_ip: ip
           }
 
+        # terminator is defined here
         remote_terminator_pid =
           receive do
+            # we see i the Flame.Backend moddoc that this message needs to be send, but where is it sent from
+            # A: it is sent by the TERMINATOR
             {^parent_ref, {:remote_up, remote_terminator_pid}} ->
               remote_terminator_pid
           after
