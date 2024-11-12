@@ -305,7 +305,7 @@ defmodule FLAME.FlyBackend do
               runner_private_ip: ip
           }
 
-        # terminator is defined here
+        # terminator is defined here -- NO! it is only received here
         remote_terminator_pid =
           receive do
             # we see i the Flame.Backend moddoc that this message needs to be send, but where is it sent from

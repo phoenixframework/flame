@@ -124,7 +124,8 @@ defmodule FLAME.LocalBackendAnotherPeer do
 
     Logger.debug("entering remote_boot!!!")
     Logger.debug("creating remote node")
-    {:ok, remote_node_pid, remote_node_name} = :peer.start_link(%{name: ~s"#{gen_random()}"})
+    # {:ok, remote_node_pid, remote_node_name} = :peer.start_link(%{name: ~s"#{gen_random()}"})
+    {:ok, remote_node_pid, remote_node_name} = create_peer_with_applications()
     IO.puts("remote_node_name:")
     IO.inspect(remote_node_name)
     IO.puts("remote_node_pid:")
@@ -159,22 +160,19 @@ defmodule FLAME.LocalBackendAnotherPeer do
         resp -> throw(resp)
       end
 
-      IO.puts("Has old backend?")
-      IO.inspect(ensure_loaded_oldbackend?)
+    IO.puts("Has old backend?")
+    IO.inspect(ensure_loaded_oldbackend?)
 
+    ensure_loaded_core_backend? =
+      case :erpc.call(remote_node_name, :code, :ensure_loaded, [FLAME.Backend]) do
+        {:badrpc, reason} -> throw(reason)
+        {:module, _} -> true
+        {:error, :nofile} -> false
+        resp -> throw(resp)
+      end
 
-
-      ensure_loaded_core_backend? =
-        case :erpc.call(remote_node_name, :code, :ensure_loaded, [FLAME.Backend]) do
-          {:badrpc, reason} -> throw(reason)
-          {:module, _} -> true
-          {:error, :nofile} -> false
-          resp -> throw(resp)
-        end
-
-        IO.puts("Has core backend?")
-        IO.inspect(ensure_loaded_core_backend?)
-
+    IO.puts("Has core backend?")
+    IO.inspect(ensure_loaded_core_backend?)
 
     Node.spawn_link(remote_node_name, __MODULE__, :remote_node_information, [
       caller_id,
@@ -204,6 +202,14 @@ defmodule FLAME.LocalBackendAnotherPeer do
     IO.inspect(resp)
 
     # TOMORROW: we are currently hitting the timeout here
+    # A day later I'm back here, but now I know the terminator is present.
+    # I need to make sure the terminator is running, and likely need to run an RPC command on the remote node myself
+
+
+    ## TODO: RPC command that deploys the terminator to the remote node
+
+
+
     remote_terminator_pid =
       receive do
         # we see i the Flame.Backend moddoc that this message needs to be send, but where is it sent from
@@ -227,5 +233,56 @@ defmodule FLAME.LocalBackendAnotherPeer do
     }
 
     {:ok, remote_terminator_pid, new_state}
+  end
+
+  def create_peer_with_applications() do
+    {:ok, pid, name} = :peer.start_link(%{name: ~s"#{gen_random()}"})
+
+    add_code_paths(name)
+    load_apps_and_transfer_configuration(name, %{})
+    ensure_apps_started(name)
+
+    {:ok, pid, name}
+  end
+
+  def rpc(node, module, function, args) do
+    :rpc.block_call(node, module, function, args)
+  end
+
+  defp add_code_paths(node) do
+    rpc(node, :code, :add_paths, [:code.get_path()])
+  end
+
+  defp load_apps_and_transfer_configuration(node, override_configs) do
+    Enum.each(Application.loaded_applications(), fn {app_name, _, _} ->
+      app_name
+      |> Application.get_all_env()
+      |> Enum.each(fn {key, primary_config} ->
+        rpc(node, Application, :put_env, [app_name, key, primary_config, [persistent: true]])
+      end)
+    end)
+
+    Enum.each(override_configs, fn {app_name, key, val} ->
+      rpc(node, Application, :put_env, [app_name, key, val, [persistent: true]])
+    end)
+  end
+
+  defp ensure_apps_started(node) do
+    loaded_names = Enum.map(Application.loaded_applications(), fn {name, _, _} -> name end)
+    # app_names = @extra_apps ++ (loaded_names -- @extra_apps)
+
+    rpc(node, Application, :ensure_all_started, [:mix])
+    rpc(node, Mix, :env, [Mix.env()])
+
+    Logger.info("on node #{node} starting applications")
+
+    Enum.reduce(loaded_names, MapSet.new(), fn app, loaded ->
+      if Enum.member?(loaded, app) do
+        loaded
+      else
+        {:ok, started} = rpc(node, Application, :ensure_all_started, [app])
+        MapSet.union(loaded, MapSet.new(started))
+      end
+    end)
   end
 end
