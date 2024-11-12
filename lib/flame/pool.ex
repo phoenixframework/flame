@@ -224,6 +224,8 @@ defmodule FLAME.Pool do
     Keyword.validate!(opts[:code_sync] || [], [
       :copy_apps,
       :copy_paths,
+      :extract_dir,
+      :tmp_dir,
       :sync_beams,
       :start_apps,
       :verbose,
