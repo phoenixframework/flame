@@ -157,7 +157,10 @@ defmodule FLAME.Runner do
   @impl true
   def init(opts) do
     runner = new(opts)
-
+    IO.inspect(opts)
+    IO.inspect(runner)
+    IO.inspect(runner.backend_init)
+    # Logger.debug("received args: #{opts}::::: Runner: #{runner}")
     case runner.backend_init do
       {:ok, backend_state} ->
         state = %{
