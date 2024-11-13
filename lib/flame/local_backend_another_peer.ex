@@ -205,25 +205,57 @@ defmodule FLAME.LocalBackendAnotherPeer do
     # A day later I'm back here, but now I know the terminator is present.
     # I need to make sure the terminator is running, and likely need to run an RPC command on the remote node myself
 
-
     ## TODO: RPC command that deploys the terminator to the remote node
+    ## TODO: I got an :ignore message (a bit humorous) telling me that I need to define a parent in the options field
 
+    terminator_opts =
+      %{
+        parent: FLAME.Parent.new(make_ref(), self(), __MODULE__, remote_node_name, nil),
+        child_placement_sup: nil,
+        failsafe_timeout: 1_000_000,
+        log: true,
+        name: remote_node_name
+      }
+      |> Enum.to_list()
 
+    # try a blocking rpc call instead
+    # we could alternative NOT send a message back from the other process and just get the terminator pid from :erpc.call
 
-    remote_terminator_pid =
-      receive do
-        # we see i the Flame.Backend moddoc that this message needs to be send, but where is it sent from
-        # A: it is sent by the TERMINATOR
-        {^parent_ref, {:remote_up, remote_terminator_pid}} ->
-          remote_terminator_pid
+    terminator_pid =
+      :erpc.call(remote_node_name, GenServer, :start_link, [FLAME.Terminator, terminator_opts])
 
-        general ->
-          IO.inspect(general)
-      after
-        50_000 ->
-          Logger.error("failed to connect to the peer machine within #{state.boot_timeout}ms")
-          exit(:timeout)
-      end
+    Logger.debug(
+      "we started the Terminator genserver on the remote node and got its PID. Inspecting..."
+    )
+
+    IO.inspect(terminator_pid)
+
+    # :erpc.call(remote_node_name, fn ->
+    #   {:module, FLAME.Terminator} = Code.ensure_loaded(FLAME.Terminator)
+    #   {:ok, terminator_pid} = GenServer.start_link(FLAME.Terminator, terminator_opts)
+
+    #   Logger.debug("we started the terminator genserver")
+    #   send(parent_ref, {:remote_up, terminator_pid})
+    #   Logger.debug("we sent a message back to the parent")
+    # end)
+
+    # boot_timeouttt = 50_000_000
+    remote_terminator_pid = terminator_pid
+
+    # remote_terminator_pid =
+    #   receive do
+    #     # we see i the Flame.Backend moddoc that this message needs to be send, but where is it sent from
+    #     # A: it is sent by the TERMINATOR
+    #     {^parent_ref, {:remote_up, remote_terminator_pid}} ->
+    #       remote_terminator_pid
+
+    #     general ->
+    #       IO.inspect(general)
+    #   after
+    #     boot_timeouttt ->
+    #       Logger.error("failed to connect to the peer machine within #{boot_timeouttt}ms")
+    #       exit(:timeout)
+    #   end
 
     new_state = %LocalBackendAnotherPeer{
       state
@@ -232,8 +264,18 @@ defmodule FLAME.LocalBackendAnotherPeer do
         remote_terminator_pid: remote_terminator_pid
     }
 
+    Logger.debug("exiting the remote boot")
     {:ok, remote_terminator_pid, new_state}
   end
+
+  # def start_terminator(node_name, terminator_opts) do
+  #   {:module, FLAME.Terminator} = Code.ensure_loaded(FLAME.Terminator)
+  #   {:ok, terminator_pid} = GenServer.start_link(FLAME.Terminator, terminator_opts)
+
+  #   Logger.debug("we started the terminator genserver")
+  #   send(parent_ref, {:remote_up, terminator_pid})
+  #   Logger.debug("we sent a message back to the parent")
+  # end
 
   def create_peer_with_applications() do
     {:ok, pid, name} = :peer.start_link(%{name: ~s"#{gen_random()}"})

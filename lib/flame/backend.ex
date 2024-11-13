@@ -60,5 +60,6 @@ defmodule FLAME.Backend do
     impl().handle_info(msg, state)
   end
 
+  # this is important and a magic mention
   def impl, do: Application.get_env(:flame, :backend, FLAME.LocalBackend)
 end
