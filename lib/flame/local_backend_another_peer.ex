@@ -19,17 +19,12 @@ defmodule FLAME.LocalBackendAnotherPeer do
   @spec gen_random(integer()) :: bitstring()
   def gen_random(length \\ 10), do: for(_ <- 1..length, into: "", do: <<Enum.random(?a..?z)>>)
 
-  @doc """
-  We need to both create the initial data structure
-  """
   @impl true
   @spec init(keyword()) :: {:ok, any()}
   def init(opts) do
-    # idempotently start epmd
     System.cmd("epmd", ["-daemon"])
     Logger.debug("started epmd")
 
-    # start distribution mode on caller
     with %{started: started?} <- :net_kernel.get_state() do
       case started? do
         :no ->
@@ -39,30 +34,13 @@ defmodule FLAME.LocalBackendAnotherPeer do
           IO.inspect(:net_kernel.get_state())
 
         :dynamic ->
-          # ensure tha twe are using longnames
           Logger.debug("the host node is using a dynamic hostname")
-          # case name_domain do
-          #   :longnames ->
-          #     Logger.debug("the host node is using the :longnames name domain")
-
-          #   :shortnames ->
-          #     Logger.debug("the host node is using the :shortnames name domain. raising for now")
-          #     raise "caller node was created using :shortname instead of :longnames"
-          # end
       end
     end
 
     Logger.debug("checked distribution mode")
-
-    # get configuration from config.exs
     conf = Application.get_env(:flame, __MODULE__) || []
-    IO.inspect(conf)
 
-    IO.puts("printing out the terminator supervisor")
-    IO.inspect(Keyword.fetch!(opts, :terminator_sup))
-    IO.puts("done printing out the terminator supervisor")
-
-    # set defaults
     default = %LocalBackendAnotherPeer{
       host_node_name: Node.self(),
       host_pid: self(),
@@ -104,11 +82,6 @@ defmodule FLAME.LocalBackendAnotherPeer do
     end
   end
 
-  @doc """
-  Since we are starting processes with links, killing the caller kills the children
-
-  remote terminator pid is (apparently) set here
-  """
   @impl true
   def system_shutdown do
     System.stop()
@@ -125,72 +98,40 @@ defmodule FLAME.LocalBackendAnotherPeer do
     {:ok, remote_node_pid, remote_node_name} = create_peer_with_applications()
     {parent_ref, parent_id} = {make_ref(), self()}
 
-    Node.spawn_link(remote_node_name, __MODULE__, :remote_node_information, [
-      parent_id,
-      parent_ref
-    ])
-
-    resp =
-      receive do
-        {^parent_ref, response} -> response
-      after
-        10_000 ->
-          exit(:timeout)
-      end
-
-    IO.puts("From remote node")
-    IO.inspect(resp)
-
-    ## TODO: We need to pull the parent Terminator Supervisor (it's probably a DynamicSupervisor) from the environment
-    # construct the name of the supervisor based on the name of the module
-    # consider putting this in the init function
-
     terminator_supervisor_name = state.terminator_sup
+
     term_sup_name =
       Module.concat(terminator_supervisor_name, to_string(System.unique_integer([:positive])))
 
     terminator_options =
       %{
-        parent: FLAME.Parent.new(parent_ref, parent_id, __MODULE__, remote_node_name, nil), # this might be an issue
+        parent: FLAME.Parent.new(parent_ref, parent_id, __MODULE__, remote_node_name, nil),
         log: :debug,
         name: term_sup_name
       }
       |> Enum.to_list()
 
-    IO.puts("printing out the terminator options")
-    IO.inspect(terminator_options)
-
-    ##
-    ##
-    ## Handling the terminator supervisor
-
-    # create the supervisor sepc
     terminator_spec =
       Supervisor.child_spec({FLAME.Terminator, terminator_options},
         restart: :temporary,
         id: term_sup_name
       )
 
-    IO.puts("printing the terminator spec")
-    IO.inspect(terminator_spec)
-    {:ok, term_pid} =
+    {:ok, _term_sup_pid} =
       :erpc.call(remote_node_name, DynamicSupervisor, :start_child, [
         terminator_supervisor_name,
         terminator_spec
       ])
 
-    IO.puts("inspecting the terminator pid")
-    IO.inspect(term_pid)
-
     remote_terminator_pid =
       case :erpc.call(remote_node_name, Process, :whereis, [term_sup_name]) do
-        terminator_pid when is_pid(terminator_pid) -> terminator_pid
+        terminator_pid when is_pid(terminator_pid) ->
+          terminator_pid
+
         all ->
           Logger.debug("printing the catchall response to Process.whereis(term_sup_name)")
           IO.inspect(all)
       end
-
-
 
     new_state = %LocalBackendAnotherPeer{
       state
@@ -202,167 +143,6 @@ defmodule FLAME.LocalBackendAnotherPeer do
     Logger.debug("exiting the remote boot")
     {:ok, remote_terminator_pid, new_state}
   end
-
-  # @impl true
-  # def remote_boot_original(%LocalBackendAnotherPeer{host_pid: parent_ref} = state) do
-  #   # start peer
-  #   # return to this and think through how to properly start the node
-  #   # note that the terminator is running on the peer, and that it must be loaded there somehow
-
-  #   Logger.debug("entering remote_boot!!!")
-  #   Logger.debug("creating remote node")
-  #   # {:ok, remote_node_pid, remote_node_name} = :peer.start_link(%{name: ~s"#{gen_random()}"})
-  #   {:ok, remote_node_pid, remote_node_name} = create_peer_with_applications()
-  #   IO.puts("remote_node_name:")
-  #   IO.inspect(remote_node_name)
-  #   IO.puts("remote_node_pid:")
-  #   IO.inspect(remote_node_pid)
-
-  #   # we ever send th parent_ref or host pid to the child, so it can never send a response back
-
-  #   # TODO: send a command to remote instance
-  #   # check for installed packages
-  #   Logger.debug("making first call to remote node")
-  #   caller_ref = make_ref()
-  #   caller_id = self()
-
-  #   Logger.debug("running 'ensure loaded'")
-
-  #   ensure_loaded_newbackend? =
-  #     case :erpc.call(remote_node_name, :code, :ensure_loaded, [FLAME.LocalBackendAnotherPeer]) do
-  #       {:badrpc, reason} -> throw(reason)
-  #       {:module, _} -> true
-  #       {:error, :nofile} -> false
-  #       resp -> throw(resp)
-  #     end
-
-  #   IO.puts("Has new backend?")
-  #   IO.inspect(ensure_loaded_newbackend?)
-
-  #   ensure_loaded_oldbackend? =
-  #     case :erpc.call(remote_node_name, :code, :ensure_loaded, [FLAME.LocalBackend]) do
-  #       {:badrpc, reason} -> throw(reason)
-  #       {:module, _} -> true
-  #       {:error, :nofile} -> false
-  #       resp -> throw(resp)
-  #     end
-
-  #   IO.puts("Has old backend?")
-  #   IO.inspect(ensure_loaded_oldbackend?)
-
-  #   ensure_loaded_core_backend? =
-  #     case :erpc.call(remote_node_name, :code, :ensure_loaded, [FLAME.Backend]) do
-  #       {:badrpc, reason} -> throw(reason)
-  #       {:module, _} -> true
-  #       {:error, :nofile} -> false
-  #       resp -> throw(resp)
-  #     end
-
-  #   IO.puts("Has core backend?")
-  #   IO.inspect(ensure_loaded_core_backend?)
-
-  #   Node.spawn_link(remote_node_name, __MODULE__, :remote_node_information, [
-  #     caller_id,
-  #     caller_ref
-  #   ])
-
-  #   # Node.spawn_link(remote_node_name, fn ->
-  #   #   available_modules = :code.all_loaded |> Enum.map(fn {x, _y} -> x end)
-
-  #   #   IO.puts("can we print from remote node?")
-
-  #   #   # create terminator pid?
-  #   #   send(caller_id, {caller_ref, %{available_modules: available_modules}})
-  #   # end)
-  #   Logger.debug("finished spawning a link")
-
-  #   resp =
-  #     receive do
-  #       {^caller_ref, response} -> response
-  #     after
-  #       10_000 ->
-  #         Logger.error("timed out waiting for response from first call to remote node")
-  #         exit(:timeout)
-  #     end
-
-  #   IO.puts("Getting from remote node")
-  #   IO.inspect(resp)
-
-  #   # TOMORROW: we are currently hitting the timeout here
-  #   # A day later I'm back here, but now I know the terminator is present.
-  #   # I need to make sure the terminator is running, and likely need to run an RPC command on the remote node myself
-
-  #   ## TODO: RPC command that deploys the terminator to the remote node
-  #   ## TODO: I got an :ignore message (a bit humorous) telling me that I need to define a parent in the options field
-
-  #   terminator_opts =
-  #     %{
-  #       parent: FLAME.Parent.new(make_ref(), self(), __MODULE__, remote_node_name, nil),
-  #       child_placement_sup: nil,
-  #       failsafe_timeout: 1_000_000,
-  #       log: true,
-  #       name: remote_node_name
-  #     }
-  #     |> Enum.to_list()
-
-  #   # try a blocking rpc call instead
-  #   # we could alternative NOT send a message back from the other process and just get the terminator pid from :erpc.call
-
-  #   terminator_pid =
-  #     :erpc.call(remote_node_name, GenServer, :start_link, [FLAME.Terminator, terminator_opts])
-
-  #   Logger.debug(
-  #     "we started the Terminator genserver on the remote node and got its PID. Inspecting..."
-  #   )
-
-  #   IO.inspect(terminator_pid)
-
-  #   # :erpc.call(remote_node_name, fn ->
-  #   #   {:module, FLAME.Terminator} = Code.ensure_loaded(FLAME.Terminator)
-  #   #   {:ok, terminator_pid} = GenServer.start_link(FLAME.Terminator, terminator_opts)
-
-  #   #   Logger.debug("we started the terminator genserver")
-  #   #   send(parent_ref, {:remote_up, terminator_pid})
-  #   #   Logger.debug("we sent a message back to the parent")
-  #   # end)
-
-  #   # boot_timeouttt = 50_000_000
-  #   remote_terminator_pid = terminator_pid
-
-  #   # remote_terminator_pid =
-  #   #   receive do
-  #   #     # we see i the Flame.Backend moddoc that this message needs to be send, but where is it sent from
-  #   #     # A: it is sent by the TERMINATOR
-  #   #     {^parent_ref, {:remote_up, remote_terminator_pid}} ->
-  #   #       remote_terminator_pid
-
-  #   #     general ->
-  #   #       IO.inspect(general)
-  #   #   after
-  #   #     boot_timeouttt ->
-  #   #       Logger.error("failed to connect to the peer machine within #{boot_timeouttt}ms")
-  #   #       exit(:timeout)
-  #   #   end
-
-  #   new_state = %LocalBackendAnotherPeer{
-  #     state
-  #     | runner_node_name: remote_node_name,
-  #       runner_node_pid: remote_node_pid,
-  #       remote_terminator_pid: remote_terminator_pid
-  #   }
-
-  #   Logger.debug("exiting the remote boot")
-  #   {:ok, remote_terminator_pid, new_state}
-  # end
-
-  # def start_terminator(node_name, terminator_opts) do
-  #   {:module, FLAME.Terminator} = Code.ensure_loaded(FLAME.Terminator)
-  #   {:ok, terminator_pid} = GenServer.start_link(FLAME.Terminator, terminator_opts)
-
-  #   Logger.debug("we started the terminator genserver")
-  #   send(parent_ref, {:remote_up, terminator_pid})
-  #   Logger.debug("we sent a message back to the parent")
-  # end
 
   def create_peer_with_applications() do
     {:ok, pid, name} = :peer.start_link(%{name: ~s"#{gen_random()}"})
@@ -398,7 +178,6 @@ defmodule FLAME.LocalBackendAnotherPeer do
 
   defp ensure_apps_started(node) do
     loaded_names = Enum.map(Application.loaded_applications(), fn {name, _, _} -> name end)
-    # app_names = @extra_apps ++ (loaded_names -- @extra_apps)
 
     rpc(node, Application, :ensure_all_started, [:mix])
     rpc(node, Mix, :env, [Mix.env()])

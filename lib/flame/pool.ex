@@ -693,22 +693,12 @@ defmodule FLAME.Pool do
       restart: :temporary
     }
 
-    # here we add the runner to the runner supervisor spec
     {:ok, pid} = DynamicSupervisor.start_child(state.runner_sup, spec)
 
     try do
       case Runner.remote_boot(pid, state.base_sync_stream) do
-        :ok ->
-          {:ok, pid}
-
-        {:error, reason} ->
-          IO.puts("coming to you from pool:start_child_runner")
-          IO.inspect(reason)
-          IO.inspect(pid)
-          IO.inspect(state)
-          IO.inspect(state.runner_sup)
-          IO.inspect(spec)
-          {:error, reason}
+        :ok -> {:ok, pid}
+        {:error, reason} -> {:error, reason}
       end
     catch
       {:exit, reason} -> {:error, {:exit, reason}}

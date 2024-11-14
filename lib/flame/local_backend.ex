@@ -10,7 +10,6 @@ defmodule FLAME.LocalBackend do
     defaults =
       Application.get_env(:flame, __MODULE__) || []
 
-    # I think this jsut ensures that terminator_sup is defined
     _terminator_sup = Keyword.fetch!(opts, :terminator_sup)
 
     {:ok,

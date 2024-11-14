@@ -156,15 +156,10 @@ defmodule FLAME.Runner do
     GenServer.call(runner_pid, {:checkin, ref, trackable_pids})
   end
 
-  # we have confirmed that terminator_sup is available in `opts`
   @impl true
   def init(opts) do
     runner = new(opts)
-    IO.puts("runner inspection")
-    IO.inspect(opts)
-    IO.inspect(runner)
-    IO.inspect(runner.backend_init)
-    # Logger.debug("received args: #{opts}::::: Runner: #{runner}")
+
     case runner.backend_init do
       {:ok, backend_state} ->
         state = %{
@@ -403,12 +398,8 @@ defmodule FLAME.Runner do
           {backend, backend.init(backend_opts)}
 
         {backend, backend_opts} when is_atom(backend) and is_list(backend_opts) ->
-          {backend, backend.init(Keyword.merge(base_backend_opts, backend_opts))} # this is where we have the backend opts. how is it passed on?????
+          {backend, backend.init(Keyword.merge(base_backend_opts, backend_opts))}
       end
-
-    IO.puts("inspecting the output of backend.init")
-    IO.inspect(backend)
-    IO.inspect(backend_init)
 
     %Runner{runner | backend: backend, backend_init: backend_init}
   end
