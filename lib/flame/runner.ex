@@ -29,6 +29,7 @@ defmodule FLAME.Runner do
              :id,
              :backend,
              :terminator,
+             :terminator_sup,
              :instance_id,
              :private_ip,
              :node_name,
@@ -45,6 +46,7 @@ defmodule FLAME.Runner do
             instance_id: nil,
             private_ip: nil,
             backend: nil,
+            terminator_sup: nil,
             terminator: nil,
             backend_init: nil,
             node_name: nil,
@@ -154,9 +156,11 @@ defmodule FLAME.Runner do
     GenServer.call(runner_pid, {:checkin, ref, trackable_pids})
   end
 
+  # we have confirmed that terminator_sup is available in `opts`
   @impl true
   def init(opts) do
     runner = new(opts)
+    IO.puts("runner inspection")
     IO.inspect(opts)
     IO.inspect(runner)
     IO.inspect(runner.backend_init)
@@ -383,6 +387,7 @@ defmodule FLAME.Runner do
         shutdown_timeout: opts[:shutdown_timeout] || 30_000,
         idle_shutdown_after: idle_shutdown_after_ms,
         idle_shutdown_check: idle_check,
+        terminator_sup: opts[:terminator_sup],
         terminator: nil,
         code_sync_opts: Keyword.get(opts, :code_sync, false)
       }
@@ -398,8 +403,12 @@ defmodule FLAME.Runner do
           {backend, backend.init(backend_opts)}
 
         {backend, backend_opts} when is_atom(backend) and is_list(backend_opts) ->
-          {backend, backend.init(Keyword.merge(base_backend_opts, backend_opts))}
+          {backend, backend.init(Keyword.merge(base_backend_opts, backend_opts))} # this is where we have the backend opts. how is it passed on?????
       end
+
+    IO.puts("inspecting the output of backend.init")
+    IO.inspect(backend)
+    IO.inspect(backend_init)
 
     %Runner{runner | backend: backend, backend_init: backend_init}
   end

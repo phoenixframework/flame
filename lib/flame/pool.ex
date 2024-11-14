@@ -693,6 +693,7 @@ defmodule FLAME.Pool do
       restart: :temporary
     }
 
+    # here we add the runner to the runner supervisor spec
     {:ok, pid} = DynamicSupervisor.start_child(state.runner_sup, spec)
 
     try do
