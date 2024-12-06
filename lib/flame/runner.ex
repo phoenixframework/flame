@@ -135,14 +135,9 @@ defmodule FLAME.Runner do
         :ok = checkin(runner_pid, ref, trackable_pids)
         {value, trackable_pids}
 
-      {kind, reason} ->
+      {:exit, reason} ->
         :ok = checkin(runner_pid, ref, [])
-
-        case kind do
-          :exit -> exit(reason)
-          :error -> raise(reason)
-          :throw -> throw(reason)
-        end
+        exit(reason)
     end
   end
 
@@ -428,8 +423,6 @@ defmodule FLAME.Runner do
     case remote_call(runner, backend_state, timeout, track_resources?, func) do
       {:ok, value} -> value
       {:exit, reason} -> exit(reason)
-      {:error, error} -> raise(error)
-      {:throw, val} -> throw(val)
     end
   end
 
