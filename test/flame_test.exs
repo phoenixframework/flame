@@ -21,11 +21,16 @@ defmodule FLAME.FLAMETest do
   end
 
   setup config do
-    runner_opts = Map.fetch!(config, :runner)
-    runner_sup = Module.concat(config.test, "RunnerSup")
-    pool_pid = start_supervised!({Pool, Keyword.merge(runner_opts, name: config.test)})
+    case config do
+      %{runner: runner_opts} ->
+        runner_sup = Module.concat(config.test, "RunnerSup")
+        pool_pid = start_supervised!({Pool, Keyword.merge(runner_opts, name: config.test)})
 
-    {:ok, runner_sup: runner_sup, pool_pid: pool_pid}
+        {:ok, runner_sup: runner_sup, pool_pid: pool_pid}
+
+      %{} ->
+        :ok
+    end
   end
 
   @tag runner: [min: 1, max: 2, max_concurrency: 2]
@@ -618,5 +623,22 @@ defmodule FLAME.FLAMETest do
       # runner idles down
       assert_receive {:DOWN, _, _, ^runner, {:shutdown, :idle}}, 1000
     end
+  end
+
+  test "code_sync artifact cleaner", config do
+    mock = FLAME.Test.CodeSyncMock.new()
+
+    cleaner = Module.concat(config.test, "Cleaner")
+
+    pool_pid =
+      start_supervised!(
+        {Pool, min: 1, max: 1, max_concurrency: 1, name: config.test, code_sync: mock.opts}
+      )
+
+    assert [artifact] = FLAME.Pool.Cleaner.list_paths(cleaner)
+    assert File.exists?(artifact)
+    assert FLAME.call(config.test, fn -> :works end) == :works
+    Supervisor.stop(pool_pid)
+    refute File.exists?(artifact)
   end
 end

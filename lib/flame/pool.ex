@@ -201,6 +201,7 @@ defmodule FLAME.Pool do
       :name,
       :runner_sup,
       :task_sup,
+      :cleaner,
       :terminator_sup,
       :child_placement_sup,
       :idle_shutdown_after,
@@ -222,6 +223,9 @@ defmodule FLAME.Pool do
     ])
 
     Keyword.validate!(opts[:code_sync] || [], [
+      :get_path,
+      :extract_dir,
+      :tmp_dir,
       :copy_apps,
       :copy_paths,
       :sync_beams,
@@ -395,6 +399,7 @@ defmodule FLAME.Pool do
     )
 
     terminator_sup = Keyword.fetch!(opts, :terminator_sup)
+    cleaner = Keyword.fetch!(opts, :cleaner)
     child_placement_sup = Keyword.fetch!(opts, :child_placement_sup)
     runner_opts = runner_opts(opts, terminator_sup)
     min = Keyword.fetch!(opts, :min)
@@ -415,6 +420,9 @@ defmodule FLAME.Pool do
           |> CodeSync.compute_changed_paths()
 
         %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(code_sync)
+
+        :ok = FLAME.Pool.Cleaner.watch_path(cleaner, parent_stream.stream.path)
+
         parent_stream
       end
 

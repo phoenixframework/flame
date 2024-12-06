@@ -13,6 +13,7 @@ defmodule FLAME.Pool.Supervisor do
   def init(opts) do
     name = Keyword.fetch!(opts, :name)
     runner_sup = Module.concat(name, "RunnerSup")
+    cleaner = Module.concat(name, "Cleaner")
     terminator_sup = Module.concat(name, "TerminatorSup")
     task_sup = Module.concat(name, "TaskSup")
 
@@ -22,6 +23,7 @@ defmodule FLAME.Pool.Supervisor do
     pool_opts =
       Keyword.merge(opts,
         task_sup: task_sup,
+        cleaner: cleaner,
         runner_sup: runner_sup,
         terminator_sup: terminator_sup,
         child_placement_sup: child_placement_sup
@@ -29,6 +31,7 @@ defmodule FLAME.Pool.Supervisor do
 
     children =
       [
+        {FLAME.Pool.Cleaner, name: cleaner},
         {Task.Supervisor, name: task_sup, strategy: :one_for_one},
         {DynamicSupervisor, name: runner_sup, strategy: :one_for_one},
         {DynamicSupervisor, name: terminator_sup, strategy: :one_for_one},
