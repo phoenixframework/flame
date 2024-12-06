@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2 (2024-12-06)
+
+### Enhancements
+- Clean up parent tmp code_sync artifacts on pool shutdown
+
 ## 0.5.1 (2024-09-19)
 
 ### Enhancements
