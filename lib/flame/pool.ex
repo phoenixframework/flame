@@ -228,6 +228,8 @@ defmodule FLAME.Pool do
       :tmp_dir,
       :copy_apps,
       :copy_paths,
+      :extract_dir,
+      :tmp_dir,
       :sync_beams,
       :start_apps,
       :verbose,
