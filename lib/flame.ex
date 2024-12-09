@@ -26,7 +26,7 @@ defmodule FLAME do
   features, entire function closures, including any state they close over, can be sent
   and executed on a remote node:
 
-      def resize_video_quality(%Video{} = video) do
+      def resize_video_quality(%Video{} = vid) do
         FLAME.call(MyApp.FFMpegRunner, fn ->
           path = "#{vid.id}_720p.mp4"
           System.cmd("ffmpeg", ~w(-i #{vid.url} -s 720x480 -c:a copy #{path}))
@@ -60,7 +60,7 @@ defmodule FLAME do
       children = [
         ...,
         {FLAME.Pool,
-         name: App.FFMpegRunner,
+         name: MyApp.FFMpegRunner,
          min: 0,
          max: 10,
          max_concurrency: 5,
@@ -75,7 +75,7 @@ defmodule FLAME do
 
   Calling a pool is as simple as passing its name to the FLAME functions:
 
-      FLAME.call(App.FFMpegRunner, fn -> :operation1 end)
+      FLAME.call(MyApp.FFMpegRunner, fn -> :operation1 end)
 
   You'll also often want to enable or disable other application services based on whether
   your application is being started as child FLAME runner or being run directly.
