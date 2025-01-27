@@ -306,9 +306,6 @@ defmodule FLAME.Pool do
           if Keyword.fetch!(place_opts, :link), do: Process.link(child_pid)
           {:cancel, {:replace, [child_pid]}, result}
 
-        :ignore ->
-          {:cancel, :ok, :ignore}
-
         {:error, _reason} = result ->
           {:cancel, :ok, result}
       end

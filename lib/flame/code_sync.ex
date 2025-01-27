@@ -193,6 +193,7 @@ defmodule FLAME.CodeSync do
           log_verbose("packaged size: #{File.stat!(out_path).size / (1024 * 1024)}mb")
         end
 
+        # TODO: Change to File.stream!(out_path, code.chunk_size) once we require Elixir v1.16+
         File.stream!(out_path, [], code.chunk_size)
       end
 
