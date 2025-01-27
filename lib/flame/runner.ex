@@ -363,9 +363,6 @@ defmodule FLAME.Runner do
         other when other in [{:ok, nil}, :error] -> {30_000, fn -> true end}
       end
 
-    timeout = opts[:timeout] || 30_000
-    boot_timeout = opts[:boot_timeout] || 30_000
-
     runner =
       %Runner{
         status: :awaiting_boot,
@@ -373,8 +370,8 @@ defmodule FLAME.Runner do
         backend_init: :pending,
         log: Keyword.get(opts, :log, false),
         single_use: Keyword.get(opts, :single_use, false),
-        timeout: max(timeout, boot_timeout),
-        boot_timeout: boot_timeout,
+        timeout: opts[:timeout] || 30_000,
+        boot_timeout: opts[:boot_timeout] || 30_000,
         shutdown_timeout: opts[:shutdown_timeout] || 30_000,
         idle_shutdown_after: idle_shutdown_after_ms,
         idle_shutdown_check: idle_check,
