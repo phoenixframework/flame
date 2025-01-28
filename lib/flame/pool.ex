@@ -700,15 +700,18 @@ defmodule FLAME.Pool do
       restart: :temporary
     }
 
-    with {:start, {:ok, pid}} <- {:start, DynamicSupervisor.start_child(state.runner_sup, spec)},
-         {:remote_boot, :ok} <- {:remote_boot, Runner.remote_boot(pid, state.base_sync_stream)} do
-      {:ok, pid}
-    else
-      {:start, {:error, reason}} ->
-        {:error, {:start_error, reason}}
+    case DynamicSupervisor.start_child(state.runner_sup, spec) do
+      {:ok, pid} ->
+        case Runner.remote_boot(pid, state.base_sync_stream) do
+          :ok ->
+            {:ok, pid}
 
-      {:remote_boot, {:error, reason}} ->
-        {:error, {:remote_boot_error, reason}}
+          {:error, reason} ->
+            {:error, {:remote_boot_error, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, {:start_error, reason}}
     end
   catch
     :exit, reason ->
