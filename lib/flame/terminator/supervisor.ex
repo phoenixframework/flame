@@ -23,12 +23,20 @@ defmodule FLAME.Terminator.Supervisor do
     child_placement_sup = child_placement_sup_name(name)
     terminator_opts = Keyword.merge(opts, child_placement_sup: child_placement_sup)
 
+    cleaner_opts = Keyword.put([], :name, FLAME.Terminator.Cleaner)
+
     children =
       [
         {DynamicSupervisor, name: child_placement_sup, strategy: :one_for_one},
         %{
           id: FLAME.Terminator,
           start: {FLAME.Terminator, :start_link, [terminator_opts]},
+          type: :worker,
+          shutdown: shutdown_timeout
+        },
+        %{
+          id: FLAME.Terminator.Cleaner,
+          start: {FLAME.Terminator.Cleaner, :start_link, [cleaner_opts]},
           type: :worker,
           shutdown: shutdown_timeout
         }
