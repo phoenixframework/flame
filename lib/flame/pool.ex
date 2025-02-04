@@ -514,11 +514,23 @@ defmodule FLAME.Pool do
     Queue.size(waiting)
   end
 
+  defp needed_count(state) do
+    (Enum.reduce(Map.values(state.runners), 1, &(&1.count + &2)) + waiting_count(state))
+    |> div(state.max_concurrency)
+    |> min(state.max)
+    |> max(1)
+  end
+
   defp min_runner(state) do
     if map_size(state.runners) == 0 do
       nil
     else
-      {_ref, min} = Enum.min_by(state.runners, fn {_, %RunnerState{count: count}} -> count end)
+      {_ref, min} =
+        state.runners
+        |> Enum.sort_by(fn {ref, _} -> ref end)
+        |> Enum.take(needed_count(state))
+        |> Enum.min_by(fn {_, %RunnerState{count: count}} -> count end)
+
       min
     end
   end

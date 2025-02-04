@@ -165,6 +165,50 @@ defmodule FLAME.FLAMETest do
              Supervisor.which_children(runner_sup)
   end
 
+  @tag runner: [min: 1, max: 2, max_concurrency: 2, idle_shutdown_after: 500]
+  test "idle shutdown while receiving work", %{runner_sup: runner_sup} = config do
+    ref = make_ref()
+    parent = self()
+
+    Task.start_link(fn ->
+      FLAME.call(config.test, fn ->
+        send(parent, {ref, :called})
+        Process.sleep(100)
+        send(parent, {ref, :done})
+      end)
+    end)
+
+    assert_receive {^ref, :called}, 100
+    sim_long_running(config.test, 200)
+    assert FLAME.call(config.test, fn -> :works end) == :works
+
+    # we've scaled from min 1 to max 2 at this point
+    assert [
+             {:undefined, runner1, :worker, [FLAME.Runner]},
+             {:undefined, runner2, :worker, [FLAME.Runner]}
+           ] = Supervisor.which_children(runner_sup)
+
+    Process.monitor(runner1)
+    Process.monitor(runner2)
+
+    assert_receive {^ref, :done}, 200
+
+    Task.start_link(fn ->
+      repeater = fn fun ->
+        assert FLAME.call(config.test, fn -> :works end) == :works
+        fun.(fun)
+      end
+
+      repeater.(repeater)
+    end)
+
+    assert_receive {:DOWN, _ref, :process, ^runner2, {:shutdown, :idle}}, 1000
+    refute_receive {:DOWN, _ref, :process, ^runner1, {:shutdown, :idle}}
+
+    assert [{:undefined, ^runner1, :worker, [FLAME.Runner]}] =
+             Supervisor.which_children(runner_sup)
+  end
+
   @tag runner: [min: 1, max: 1, max_concurrency: 2, idle_shutdown_after: 500]
   test "pool runner DOWN exits any active checkouts", %{runner_sup: runner_sup} = config do
     {:ok, active_checkout} = sim_long_running(config.test, 10_000)
