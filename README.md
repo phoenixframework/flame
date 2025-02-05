@@ -1,3 +1,5 @@
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/phoenixframework/flame/elixir.yml)](https://github.com/phoenixframework/flame/actions/workflows/elixir.yml) [![Hex.pm](https://img.shields.io/hexpm/v/flame.svg)](https://hex.pm/packages/flame) [![Documentation](https://img.shields.io/badge/documentation-gray)](https://hexdocs.pm/flame)
+
 Imagine if we could auto scale simply by wrapping any existing app code in a function and have that block of code run in a temporary copy of the app.
 
 Enter the FLAME pattern.
