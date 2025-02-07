@@ -32,6 +32,7 @@ defmodule FLAME.Terminator do
             single_use: false,
             calls: %{},
             watchers: %{},
+            paths: [],
             log: false,
             status: nil,
             failsafe_timer: nil,
@@ -71,6 +72,10 @@ defmodule FLAME.Terminator do
 
   def watch(terminator, pids) do
     GenServer.call(terminator, {:watch, pids})
+  end
+
+  def watch_path(terminator, path) do
+    GenServer.call(terminator, {:watch_path, path})
   end
 
   def deadline_me(terminator, timeout) do
@@ -263,6 +268,10 @@ defmodule FLAME.Terminator do
     {:reply, :ok, cancel_idle_shutdown(state)}
   end
 
+  def handle_call({:watch_path, path}, _from, %Terminator{watchers: paths} = state) do
+    {:reply, :ok, %{state | paths: [path | paths]}}
+  end
+
   def handle_call(:system_shutdown, _from, %Terminator{} = state) do
     {:reply, :ok,
      system_stop(state, "system shutdown instructed from parent #{inspect(state.parent.pid)}")}
@@ -288,12 +297,21 @@ defmodule FLAME.Terminator do
     {:reply, :ok, schedule_idle_shutdown(new_state)}
   end
 
+  defp clean_up_paths(paths) do
+    for path <- paths do
+      File.rm_rf(path)
+    end
+  end
+
   @impl true
   def terminate(_reason, %Terminator{} = state) do
     state =
       state
       |> cancel_idle_shutdown()
       |> system_stop("terminating")
+
+    # clean up any paths that were watched before waiting to not be killed
+    clean_up_paths(state.paths)
 
     # supervisor will force kill us if we take longer than configured shutdown_timeout
     Enum.each(state.calls, fn
@@ -306,6 +324,7 @@ defmodule FLAME.Terminator do
           {:DOWN, ^ref, :process, _pid, _reason} -> :ok
         end
     end)
+
   end
 
   defp update_caller(%Terminator{} = state, ref, func)

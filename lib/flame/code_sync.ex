@@ -232,7 +232,8 @@ defmodule FLAME.CodeSync do
       # add code paths
       :ok = add_code_paths_from_tar(pkg, extract_dir)
 
-      FLAME.Terminator.Cleaner.watch_path(FLAME.Terminator.Cleaner, extract_dir)
+      # add path to clean up
+      FLAME.Terminator.watch_path(FLAME.Terminator, extract_dir)
 
       File.rm(target_tmp_path)
 
