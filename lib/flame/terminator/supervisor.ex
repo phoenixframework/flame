@@ -23,7 +23,6 @@ defmodule FLAME.Terminator.Supervisor do
     child_placement_sup = child_placement_sup_name(name)
     terminator_opts = Keyword.merge(opts, child_placement_sup: child_placement_sup)
 
-
     children =
       [
         {DynamicSupervisor, name: child_placement_sup, strategy: :one_for_one},

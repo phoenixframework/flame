@@ -324,7 +324,6 @@ defmodule FLAME.Terminator do
           {:DOWN, ^ref, :process, _pid, _reason} -> :ok
         end
     end)
-
   end
 
   defp update_caller(%Terminator{} = state, ref, func)
