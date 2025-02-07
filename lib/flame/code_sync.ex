@@ -216,7 +216,7 @@ defmodule FLAME.CodeSync do
   defp trim_leading_slash([?/ | path]), do: path
   defp trim_leading_slash([_ | _] = path), do: path
 
-  def extract_packaged_stream(%PackagedStream{} = pkg) do
+  def extract_packaged_stream(%PackagedStream{} = pkg, terminator) do
     if pkg.stream do
       verbose = if pkg.verbose, do: [:verbose], else: []
       compressed = if pkg.compress, do: [:compressed], else: []
@@ -233,7 +233,7 @@ defmodule FLAME.CodeSync do
       :ok = add_code_paths_from_tar(pkg, extract_dir)
 
       # add path to clean up
-      FLAME.Terminator.watch_path(FLAME.Terminator, extract_dir)
+      FLAME.Terminator.watch_path(terminator, extract_dir)
 
       File.rm(target_tmp_path)
 
