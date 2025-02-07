@@ -308,8 +308,13 @@ defmodule FLAME.Runner do
                   # ensure app is fully started if parent connects before up
                   if otp_app, do: {:ok, _} = Application.ensure_all_started(otp_app)
 
-                  if base_sync_stream, do: CodeSync.extract_packaged_stream(base_sync_stream, term)
-                  if beams_stream, do: CodeSync.extract_packaged_stream(beams_stream, term)
+                  if base_sync_stream do
+                    CodeSync.extract_packaged_stream(base_sync_stream, term)
+                  end
+
+                  if beams_stream do
+                    CodeSync.extract_packaged_stream(beams_stream, term)
+                  end
 
                   :ok =
                     Terminator.schedule_idle_shutdown(term, idle_after, idle_check, single_use)
