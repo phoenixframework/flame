@@ -114,7 +114,7 @@ defmodule FLAME.CodeSyncTest do
     Application.stop(:logger)
     refute :logger in started_apps()
 
-    assert :ok = CodeSync.extract_packaged_stream(pkg)
+    assert CodeSync.extract_packaged_stream(pkg) == mock.extract_dir
 
     assert CodeSyncMock.extracted_rel_paths(mock) == [
              "one/ebin/Elixir.FLAME.Test.CodeSyncMock.Mod1.beam",

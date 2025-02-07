@@ -216,48 +216,45 @@ defmodule FLAME.CodeSync do
   defp trim_leading_slash([?/ | path]), do: path
   defp trim_leading_slash([_ | _] = path), do: path
 
-  def extract_packaged_stream(%PackagedStream{} = pkg, terminator) do
-    if pkg.stream do
-      verbose = if pkg.verbose, do: [:verbose], else: []
-      compressed = if pkg.compress, do: [:compressed], else: []
-      extract_dir = mfa(pkg.extract_dir)
-      target_tmp_path = Path.join([mfa(pkg.tmp_dir), "flame_child_code_sync_#{pkg.id}.tar.gz"])
-      flame_stream = File.stream!(target_tmp_path)
-      # transfer the file
-      Enum.into(pkg.stream, flame_stream)
+  def extract_packaged_stream(%PackagedStream{} = pkg) do
+    extract_dir =
+      if pkg.stream do
+        verbose = if pkg.verbose, do: [:verbose], else: []
+        compressed = if pkg.compress, do: [:compressed], else: []
+        extract_dir = mfa(pkg.extract_dir)
+        target_tmp_path = Path.join([mfa(pkg.tmp_dir), "flame_child_code_sync_#{pkg.id}.tar.gz"])
 
-      # extract tar
-      :ok = :erl_tar.extract(target_tmp_path, [{:cwd, extract_dir}] ++ compressed ++ verbose)
+        flame_stream = File.stream!(target_tmp_path)
+        Enum.into(pkg.stream, flame_stream)
 
-      # add code paths
-      :ok = add_code_paths_from_tar(pkg, extract_dir)
+        :ok = :erl_tar.extract(target_tmp_path, [{:cwd, extract_dir}] ++ compressed ++ verbose)
+        :ok = add_code_paths_from_tar(pkg, extract_dir)
 
-      # add path to clean up
-      FLAME.Terminator.watch_path(terminator, extract_dir)
+        File.rm(target_tmp_path)
 
-      File.rm(target_tmp_path)
+        # purge any deleted modules
+        for mod <- pkg.purge_modules do
+          if pkg.verbose && !Enum.empty?(pkg.purge_modules),
+            do: log_verbose("purging #{inspect(pkg.purge_modules)}")
 
-      # purge any deleted modules
-      for mod <- pkg.purge_modules do
-        if pkg.verbose && !Enum.empty?(pkg.purge_modules),
-          do: log_verbose("purging #{inspect(pkg.purge_modules)}")
-
-        :code.purge(mod)
-        :code.delete(mod)
-      end
-
-      # delete any deleted code paths, and prune empty dirs
-      for del_path <- pkg.deleted_paths do
-        File.rm(del_path)
-        ebin_dir = Path.dirname(del_path)
-
-        if File.ls!(ebin_dir) == [] do
-          if pkg.verbose, do: log_verbose("deleting path #{ebin_dir}")
-          File.rm_rf(ebin_dir)
-          :code.del_path(String.to_charlist(ebin_dir))
+          :code.purge(mod)
+          :code.delete(mod)
         end
+
+        # delete any deleted code paths, and prune empty dirs
+        for del_path <- pkg.deleted_paths do
+          File.rm(del_path)
+          ebin_dir = Path.dirname(del_path)
+
+          if File.ls!(ebin_dir) == [] do
+            if pkg.verbose, do: log_verbose("deleting path #{ebin_dir}")
+            File.rm_rf(ebin_dir)
+            :code.del_path(String.to_charlist(ebin_dir))
+          end
+        end
+
+        extract_dir
       end
-    end
 
     # start any synced apps
     if !Enum.empty?(pkg.apps_to_start) do
@@ -265,7 +262,7 @@ defmodule FLAME.CodeSync do
       if pkg.verbose, do: log_verbose("started #{inspect(started)}")
     end
 
-    :ok
+    extract_dir
   end
 
   def rm_packaged_stream(%PackagedStream{} = pkg) do

@@ -256,7 +256,9 @@ defmodule FLAME.Runner do
           terminator = state.runner.terminator
 
           remote_call!(state.runner, state.backend_state, state.runner.boot_timeout, false, fn ->
-            :ok = CodeSync.extract_packaged_stream(parent_pkg, terminator)
+            if extract_dir = CodeSync.extract_packaged_stream(parent_pkg) do
+              FLAME.Terminator.watch_path(terminator, extract_dir)
+            end
           end)
 
           CodeSync.rm_packaged_stream(parent_pkg)
@@ -308,12 +310,13 @@ defmodule FLAME.Runner do
                   # ensure app is fully started if parent connects before up
                   if otp_app, do: {:ok, _} = Application.ensure_all_started(otp_app)
 
-                  if base_sync_stream do
-                    CodeSync.extract_packaged_stream(base_sync_stream, term)
+                  if extract_dir =
+                       base_sync_stream && CodeSync.extract_packaged_stream(base_sync_stream) do
+                    FLAME.Terminator.watch_path(term, extract_dir)
                   end
 
-                  if beams_stream do
-                    CodeSync.extract_packaged_stream(beams_stream, term)
+                  if extract_dir = beams_stream && CodeSync.extract_packaged_stream(beams_stream) do
+                    FLAME.Terminator.watch_path(term, extract_dir)
                   end
 
                   :ok =

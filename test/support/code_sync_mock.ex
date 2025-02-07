@@ -11,7 +11,7 @@ defmodule FLAME.Test.CodeSyncMock.Mod3 do
 end
 
 defmodule FLAME.Test.CodeSyncMock do
-  defstruct opts: nil, id: nil
+  defstruct opts: nil, id: nil, extract_dir: nil
   alias FLAME.Test.CodeSyncMock
 
   def new(opts \\ []) do
@@ -53,7 +53,7 @@ defmodule FLAME.Test.CodeSyncMock do
       get_path: get_path
     ]
 
-    %CodeSyncMock{id: id, opts: Keyword.merge(default_opts, opts)}
+    %CodeSyncMock{id: id, opts: Keyword.merge(default_opts, opts), extract_dir: extract_dir}
   end
 
   def extract_dir(id, test_pid, extract_dir) do
