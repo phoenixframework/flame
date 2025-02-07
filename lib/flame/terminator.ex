@@ -251,10 +251,10 @@ defmodule FLAME.Terminator do
     new_state =
       new_state
       |> update_caller(child_ref, fn child ->
-        %Caller{child | placed_caller_ref: caller_ref, link?: link?}
+        %{child | placed_caller_ref: caller_ref, link?: link?}
       end)
       |> update_caller(caller_ref, fn caller ->
-        %Caller{caller | placed_child_ref: child_ref, link?: link?}
+        %{caller | placed_child_ref: child_ref, link?: link?}
       end)
 
     {:reply, {:ok, child_pid}, new_state}
@@ -287,7 +287,7 @@ defmodule FLAME.Terminator do
         _from,
         %Terminator{} = state
       ) do
-    new_state = %Terminator{
+    new_state = %{
       state
       | single_use: single_use?,
         idle_shutdown_after: idle_after,
@@ -328,7 +328,7 @@ defmodule FLAME.Terminator do
 
   defp update_caller(%Terminator{} = state, ref, func)
        when is_reference(ref) and is_function(func, 1) do
-    %Terminator{state | calls: Map.update!(state.calls, ref, func)}
+    %{state | calls: Map.update!(state.calls, ref, func)}
   end
 
   defp deadline_caller(%Terminator{} = state, from_pid, timeout)
@@ -343,14 +343,14 @@ defmodule FLAME.Terminator do
       end
 
     caller = %Caller{from_pid: from_pid, timer: timer}
-    new_state = %Terminator{state | calls: Map.put(state.calls, ref, caller)}
+    new_state = %{state | calls: Map.put(state.calls, ref, caller)}
     {ref, cancel_idle_shutdown(new_state)}
   end
 
   defp drop_caller(%Terminator{} = state, ref) when is_reference(ref) do
     %{^ref => %Caller{} = caller} = state.calls
     if caller.timer, do: Process.cancel_timer(caller.timer)
-    state = %Terminator{state | calls: Map.delete(state.calls, ref)}
+    state = %{state | calls: Map.delete(state.calls, ref)}
 
     # if the caller going down was one that placed a child, and the child is still tracked:
     #  - if the child is not linked (link: false), do nothing
@@ -367,7 +367,7 @@ defmodule FLAME.Terminator do
         if placed_child.timer, do: Process.cancel_timer(placed_child.timer)
         Process.demonitor(placed_child_ref, [:flush])
         DynamicSupervisor.terminate_child(state.child_placement_sup, placed_child.from_pid)
-        %Terminator{state | calls: Map.delete(state.calls, placed_child_ref)}
+        %{state | calls: Map.delete(state.calls, placed_child_ref)}
       else
         _ -> state
       end
@@ -379,7 +379,7 @@ defmodule FLAME.Terminator do
            %{^placed_caller_ref => %Caller{} = placed_caller} <- state.calls do
         if placed_caller.timer, do: Process.cancel_timer(placed_caller.timer)
         Process.demonitor(placed_caller_ref, [:flush])
-        %Terminator{state | calls: Map.delete(state.calls, placed_caller_ref)}
+        %{state | calls: Map.delete(state.calls, placed_caller_ref)}
       else
         _ -> state
       end
@@ -407,19 +407,19 @@ defmodule FLAME.Terminator do
 
     case state.idle_shutdown_after do
       time when time in [nil, :infinity] ->
-        %Terminator{state | idle_shutdown_timer: {nil, make_ref()}}
+        %{state | idle_shutdown_timer: {nil, make_ref()}}
 
       time when is_integer(time) ->
         timer_ref = make_ref()
         timer = Process.send_after(self(), {:idle_shutdown, timer_ref}, time)
-        %Terminator{state | idle_shutdown_timer: {timer, timer_ref}}
+        %{state | idle_shutdown_timer: {timer, timer_ref}}
     end
   end
 
   defp cancel_idle_shutdown(%Terminator{} = state) do
     {timer, _ref} = state.idle_shutdown_timer
     if timer, do: Process.cancel_timer(timer)
-    %Terminator{state | idle_shutdown_timer: {nil, make_ref()}}
+    %{state | idle_shutdown_timer: {nil, make_ref()}}
   end
 
   defp connect(%Terminator{parent: %Parent{} = parent} = state) do
@@ -435,7 +435,7 @@ defmodule FLAME.Terminator do
 
       send_parent(parent, {:remote_up, self()})
 
-      %Terminator{
+      %{
         state
         | status: :connected,
           parent_monitor_ref: ref,
@@ -444,7 +444,7 @@ defmodule FLAME.Terminator do
           connect_attempts: new_attempts
       }
     else
-      %Terminator{
+      %{
         state
         | connect_timer: Process.send_after(self(), :connect, 100),
           connect_attempts: new_attempts
@@ -458,7 +458,7 @@ defmodule FLAME.Terminator do
       parent.backend.system_shutdown()
     end
 
-    %Terminator{state | status: :stopping}
+    %{state | status: :stopping}
   end
 
   defp log(%Terminator{log: level}, message) do

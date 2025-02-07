@@ -488,7 +488,7 @@ defmodule FLAME.Pool do
   end
 
   def handle_info(:async_boot_continue, %Pool{} = state) do
-    {:noreply, async_boot_runner(%Pool{state | async_boot_timer: nil})}
+    {:noreply, async_boot_runner(%{state | async_boot_timer: nil})}
   end
 
   def handle_info({:cancel, ref, caller_pid, reason}, state) do
@@ -567,7 +567,7 @@ defmodule FLAME.Pool do
       |> Map.delete(caller_pid)
       |> Map.put(child_pid, new_caller)
 
-    %Pool{state | callers: new_callers}
+    %{state | callers: new_callers}
   end
 
   defp checkin_runner(state, ref, caller_pid, reason)
@@ -630,7 +630,7 @@ defmodule FLAME.Pool do
       runner_ref: runner.monitor_ref
     }
 
-    new_state = %Pool{state | callers: Map.put(state.callers, from_pid, new_caller)}
+    new_state = %{state | callers: Map.put(state.callers, from_pid, new_caller)}
 
     inc_runner_count(new_state, runner.monitor_ref)
   end
@@ -638,7 +638,7 @@ defmodule FLAME.Pool do
   defp waiting_in(%Pool{} = state, deadline, {pid, _tag} = from) do
     ref = Process.monitor(pid)
     waiting = %WaitingState{from: from, monitor_ref: ref, deadline: deadline}
-    %Pool{state | waiting: Queue.insert(state.waiting, waiting, pid)}
+    %{state | waiting: Queue.insert(state.waiting, waiting, pid)}
   end
 
   defp boot_runners(%Pool{} = state) do
@@ -667,11 +667,8 @@ defmodule FLAME.Pool do
 
   defp schedule_async_boot_runner(%Pool{} = state) do
     if state.async_boot_timer, do: Process.cancel_timer(state.async_boot_timer)
-
-    %Pool{
-      state
-      | async_boot_timer: Process.send_after(self(), :async_boot_continue, @async_boot_debounce)
-    }
+    timer = Process.send_after(self(), :async_boot_continue, @async_boot_debounce)
+    %{state | async_boot_timer: timer}
   end
 
   defp async_boot_runner(%Pool{on_grow_start: on_grow_start, name: name} = state) do
@@ -685,7 +682,7 @@ defmodule FLAME.Pool do
       end)
 
     new_pending = Map.put(state.pending_runners, task.ref, task.pid)
-    %Pool{state | pending_runners: new_pending}
+    %{state | pending_runners: new_pending}
   end
 
   defp start_child_runner(%Pool{} = state, runner_opts \\ []) do
@@ -713,48 +710,49 @@ defmodule FLAME.Pool do
   defp put_runner(%Pool{} = state, pid) when is_pid(pid) do
     ref = Process.monitor(pid)
     runner = %RunnerState{count: 0, pid: pid, monitor_ref: ref}
-    new_state = %Pool{state | runners: Map.put(state.runners, runner.monitor_ref, runner)}
+    new_state = %{state | runners: Map.put(state.runners, runner.monitor_ref, runner)}
     {runner, new_state}
   end
 
   defp inc_runner_count(%Pool{} = state, ref) do
     new_runners =
       Map.update!(state.runners, ref, fn %RunnerState{} = runner ->
-        %RunnerState{runner | count: runner.count + 1}
+        %{runner | count: runner.count + 1}
       end)
 
-    %Pool{state | runners: new_runners}
+    %{state | runners: new_runners}
   end
 
   defp dec_runner_count(%Pool{} = state, ref) do
     new_runners =
       Map.update!(state.runners, ref, fn %RunnerState{} = runner ->
-        %RunnerState{runner | count: runner.count - 1}
+        %{runner | count: runner.count - 1}
       end)
 
-    %Pool{state | runners: new_runners}
+    %{state | runners: new_runners}
   end
 
   defp drop_child_runner(%Pool{} = state, runner_ref) when is_reference(runner_ref) do
     %{^runner_ref => %RunnerState{}} = state.runners
     Process.demonitor(runner_ref, [:flush])
+
     # kill all callers that still had a checkout for this runner
     new_state =
       Enum.reduce(state.callers, state, fn
         {caller_pid, %Caller{monitor_ref: ref, runner_ref: ^runner_ref}}, acc ->
           Process.demonitor(ref, [:flush])
           Process.exit(caller_pid, :kill)
-          %Pool{acc | callers: Map.delete(acc.callers, caller_pid)}
+          %{acc | callers: Map.delete(acc.callers, caller_pid)}
 
         {_caller_pid, %Caller{}}, acc ->
           acc
       end)
 
-    maybe_on_shrink(%Pool{new_state | runners: Map.delete(new_state.runners, runner_ref)})
+    maybe_on_shrink(%{new_state | runners: Map.delete(new_state.runners, runner_ref)})
   end
 
   defp drop_caller(%Pool{} = state, caller_pid, %Caller{} = caller) when is_pid(caller_pid) do
-    new_state = %Pool{state | callers: Map.delete(state.callers, caller_pid)}
+    new_state = %{state | callers: Map.delete(state.callers, caller_pid)}
 
     new_state
     |> dec_runner_count(caller.runner_ref)
@@ -762,7 +760,7 @@ defmodule FLAME.Pool do
   end
 
   defp maybe_drop_waiting(%Pool{} = state, caller_pid) when is_pid(caller_pid) do
-    %Pool{state | waiting: Queue.delete_by_key(state.waiting, caller_pid)}
+    %{state | waiting: Queue.delete_by_key(state.waiting, caller_pid)}
   end
 
   defp pop_next_waiting_caller(%Pool{} = state) do
@@ -780,8 +778,8 @@ defmodule FLAME.Pool do
       end)
 
     case result do
-      {nil, %Queue{} = new_waiting} -> {nil, %Pool{state | waiting: new_waiting}}
-      {{_pid, %WaitingState{} = first}, %Queue{} = rest} -> {first, %Pool{state | waiting: rest}}
+      {nil, %Queue{} = new_waiting} -> {nil, %{state | waiting: new_waiting}}
+      {{_pid, %WaitingState{} = first}, %Queue{} = rest} -> {first, %{state | waiting: rest}}
     end
   end
 
@@ -816,7 +814,7 @@ defmodule FLAME.Pool do
 
     case state.pending_runners do
       %{^ref => _} ->
-        state = %Pool{state | pending_runners: Map.delete(state.pending_runners, ref)}
+        state = %{state | pending_runners: Map.delete(state.pending_runners, ref)}
         # we rate limit this to avoid many failed async boot attempts
         if has_unmet_servicable_demand?(state) do
           state
@@ -859,7 +857,7 @@ defmodule FLAME.Pool do
     %{^ref => task_pid} = state.pending_runners
     Process.demonitor(ref, [:flush])
 
-    new_state = %Pool{state | pending_runners: Map.delete(state.pending_runners, ref)}
+    new_state = %{state | pending_runners: Map.delete(state.pending_runners, ref)}
     {runner, new_state} = put_runner(new_state, pid)
     new_state = maybe_on_grow_end(new_state, task_pid, :ok)
 

@@ -294,7 +294,7 @@ defmodule FLAME.Runner do
           case runner.backend.remote_boot(backend_state) do
             {:ok, remote_terminator_pid, new_backend_state} when is_pid(remote_terminator_pid) ->
               Process.monitor(remote_terminator_pid)
-              new_runner = %Runner{runner | terminator: remote_terminator_pid, status: :booted}
+              new_runner = %{runner | terminator: remote_terminator_pid, status: :booted}
               new_state = %{state | runner: new_runner, backend_state: new_backend_state}
               {new_state, beams_stream} = maybe_stream_code_paths(new_state)
 
@@ -403,7 +403,7 @@ defmodule FLAME.Runner do
           {backend, backend.init(Keyword.merge(base_backend_opts, backend_opts))}
       end
 
-    %Runner{runner | backend: backend, backend_init: backend_init}
+    %{runner | backend: backend, backend_init: backend_init}
   end
 
   defp time(%Runner{log: false} = _runner, _label, func) do
@@ -525,7 +525,7 @@ defmodule FLAME.Runner do
         |> CodeSync.compute_sync_beams()
 
       %CodeSync.PackagedStream{} = parent_stream = CodeSync.package_to_stream(code_sync)
-      new_runner = %Runner{runner | code_sync: code_sync}
+      new_runner = %{runner | code_sync: code_sync}
       {%{state | runner: new_runner}, parent_stream}
     else
       {state, nil}
@@ -535,7 +535,7 @@ defmodule FLAME.Runner do
   defp maybe_diff_code_paths(%{runner: %Runner{} = runner} = state) do
     if runner.code_sync do
       diffed_code = CodeSync.diff(runner.code_sync)
-      new_runner = %Runner{runner | code_sync: diffed_code}
+      new_runner = %{runner | code_sync: diffed_code}
       new_state = %{state | runner: new_runner}
 
       if CodeSync.changed?(diffed_code) do

@@ -191,7 +191,7 @@ defmodule FLAME.FlyBackend do
       end
     end
 
-    state = %FlyBackend{state | runner_node_base: "#{state.app}-flame-#{rand_id(20)}"}
+    state = %{state | runner_node_base: "#{state.app}-flame-#{rand_id(20)}"}
     parent_ref = make_ref()
 
     encoded_parent =
@@ -217,8 +217,7 @@ defmodule FLAME.FlyBackend do
         end
       end)
 
-    new_state =
-      %FlyBackend{state | env: new_env, parent_ref: parent_ref, local_ip: ip}
+    new_state = %{state | env: new_env, parent_ref: parent_ref, local_ip: ip}
 
     {:ok, new_state}
   end
@@ -286,19 +285,19 @@ defmodule FLAME.FlyBackend do
         )
       end)
 
-    if state.log,
-      do:
-        Logger.log(
-          state.log,
-          "#{inspect(__MODULE__)} #{inspect(node())} machine create #{req_connect_time}ms"
-        )
+    if state.log do
+      Logger.log(
+        state.log,
+        "#{inspect(__MODULE__)} #{inspect(node())} machine create #{req_connect_time}ms"
+      )
+    end
 
     remaining_connect_window = state.boot_timeout - req_connect_time
 
     case resp do
       %{"id" => id, "instance_id" => instance_id, "private_ip" => ip} ->
         new_state =
-          %FlyBackend{
+          %{
             state
             | runner_id: id,
               runner_instance_id: instance_id,
@@ -315,7 +314,7 @@ defmodule FLAME.FlyBackend do
               exit(:timeout)
           end
 
-        new_state = %FlyBackend{
+        new_state = %{
           new_state
           | remote_terminator_pid: remote_terminator_pid,
             runner_node_name: node(remote_terminator_pid)

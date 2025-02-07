@@ -82,7 +82,7 @@ defmodule FLAME.CodeSync do
           apps
       end
 
-    %CodeSync{code | apps_to_start: apps_to_start}
+    %{code | apps_to_start: apps_to_start}
   end
 
   def compute_sync_beams(%CodeSync{} = code) do
@@ -93,7 +93,7 @@ defmodule FLAME.CodeSync do
           into: %{},
           do: {path, :erlang.md5(File.read!(path))}
 
-    %CodeSync{
+    %{
       code
       | sync_beam_hashes: beam_hashes,
         changed_paths: Enum.uniq(code.changed_paths ++ sync_beams_files)
@@ -124,7 +124,7 @@ defmodule FLAME.CodeSync do
           lookup_apps_files(code)
       end
 
-    %CodeSync{code | changed_paths: Enum.uniq(code.changed_paths ++ changed_paths)}
+    %{code | changed_paths: Enum.uniq(code.changed_paths ++ changed_paths)}
   end
 
   def changed?(%CodeSync{} = code) do
@@ -153,7 +153,7 @@ defmodule FLAME.CodeSync do
       for path <- deleted_paths,
           do: path |> Path.basename(".beam") |> String.to_atom()
 
-    %CodeSync{
+    %{
       current
       | changed_paths: changed,
         deleted_paths: deleted_paths,
