@@ -254,7 +254,7 @@ defmodule FLAME.Runner do
 
         {new_state, %CodeSync.PackagedStream{} = parent_pkg} ->
           remote_call!(state.runner, state.backend_state, state.runner.boot_timeout, false, fn ->
-            :ok = CodeSync.extract_packaged_stream(parent_pkg)
+            :ok = CodeSync.extract_packaged_stream(parent_pkg, state.runner.terminator)
           end)
 
           CodeSync.rm_packaged_stream(parent_pkg)
