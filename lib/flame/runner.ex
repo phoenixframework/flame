@@ -253,8 +253,10 @@ defmodule FLAME.Runner do
           new_state
 
         {new_state, %CodeSync.PackagedStream{} = parent_pkg} ->
+          terminator = state.runner.terminator
+
           remote_call!(state.runner, state.backend_state, state.runner.boot_timeout, false, fn ->
-            :ok = CodeSync.extract_packaged_stream(parent_pkg)
+            :ok = CodeSync.extract_packaged_stream(parent_pkg, terminator)
           end)
 
           CodeSync.rm_packaged_stream(parent_pkg)
@@ -306,8 +308,13 @@ defmodule FLAME.Runner do
                   # ensure app is fully started if parent connects before up
                   if otp_app, do: {:ok, _} = Application.ensure_all_started(otp_app)
 
-                  if base_sync_stream, do: CodeSync.extract_packaged_stream(base_sync_stream)
-                  if beams_stream, do: CodeSync.extract_packaged_stream(beams_stream)
+                  if base_sync_stream do
+                    CodeSync.extract_packaged_stream(base_sync_stream, term)
+                  end
+
+                  if beams_stream do
+                    CodeSync.extract_packaged_stream(beams_stream, term)
+                  end
 
                   :ok =
                     Terminator.schedule_idle_shutdown(term, idle_after, idle_check, single_use)
