@@ -40,6 +40,7 @@ defmodule FLAME.Pool do
   alias FLAME.{Pool, Runner, Queue, CodeSync}
   alias FLAME.Pool.{RunnerState, WaitingState, Caller}
 
+  @calling_sample_count 10
   @default_max_concurrency 100
   @boot_timeout 30_000
   @idle_shutdown_after 30_000
@@ -57,6 +58,7 @@ defmodule FLAME.Pool do
             max: nil,
             max_concurrency: nil,
             callers: %{},
+            calling_samples: [],
             waiting: Queue.new(),
             runners: %{},
             pending_runners: %{},
@@ -514,8 +516,20 @@ defmodule FLAME.Pool do
     Queue.size(waiting)
   end
 
-  defp needed_count(state) do
-    (Enum.reduce(Map.values(state.runners), 1, &(&1.count + &2)) + waiting_count(state))
+  defp calling_count(state) do
+    map_size(state.callers) + waiting_count(state)
+  end
+
+  defp sample_calling_count(state) do
+    Map.put(
+      state,
+      :calling_samples,
+      Enum.take([calling_count(state) | state.calling_samples], @calling_sample_count)
+    )
+  end
+
+  defp needed_runners_count(state) do
+    Enum.max(state.calling_samples)
     |> div(state.max_concurrency)
     |> min(state.max)
     |> max(1)
@@ -528,7 +542,7 @@ defmodule FLAME.Pool do
       {_ref, min} =
         state.runners
         |> Enum.sort_by(fn {ref, _} -> ref end)
-        |> Enum.take(needed_count(state))
+        |> Enum.take(needed_runners_count(state))
         |> Enum.min_by(fn {_, %RunnerState{count: count}} -> count end)
 
       min
@@ -601,6 +615,7 @@ defmodule FLAME.Pool do
   end
 
   defp checkout_runner(%Pool{} = state, deadline, from, monitor_ref \\ nil) do
+    state = sample_calling_count(state)
     min_runner = min_runner(state)
     runner_count = runner_count(state)
 
