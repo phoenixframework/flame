@@ -40,7 +40,7 @@ defmodule FLAME.Pool do
   alias FLAME.{Pool, Runner, Queue, CodeSync}
   alias FLAME.Pool.{RunnerState, WaitingState, Caller}
 
-  @calling_sample_count 10
+  @calling_sample_count 3
   @default_max_concurrency 100
   @boot_timeout 30_000
   @idle_shutdown_after 30_000
@@ -529,7 +529,7 @@ defmodule FLAME.Pool do
   end
 
   defp needed_runners_count(state) do
-    Enum.max(state.calling_samples)
+    Enum.sum(state.calling_samples)
     |> div(state.max_concurrency)
     |> min(state.max)
     |> max(1)
