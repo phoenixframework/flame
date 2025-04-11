@@ -12,7 +12,7 @@ defmodule FLAME.DockerBackend do
   * `:image` - The Docker image to use for the containers. Required.
   * `:env` - Environment variables to pass to the container. Defaults to `%{}`.
   * `:boot_timeout` - The boot timeout in milliseconds. Defaults to `30_000`.
-  * `:docker_host` - The Docker host to connect to. Defaults to `"unix:///var/run/docker.sock"`.
+  * `:docker_host` - The Docker host to connect to. Defaults to `"http://127.0.0.1:2375"`. Be sure to run `socat TCP-LISTEN:2375,reuseaddr,fork UNIX-CONNECT:/var/run/docker.sock &` to expose the Docker socket to the host via TCP.
   * `:docker_api_version` - The Docker API version to use. Defaults to `"1.41"`.
   * `:log` - Whether to enable logging. Defaults to `false`.
 
@@ -93,7 +93,7 @@ defmodule FLAME.DockerBackend do
       image: nil,
       env: %{},
       boot_timeout: 30_000,
-      docker_host: "unix:///var/run/docker.sock",
+      docker_host: "http://127.0.0.1:2375",
       docker_api_version: "1.41",
       log: Keyword.get(conf, :log, false)
     }
@@ -164,7 +164,7 @@ defmodule FLAME.DockerBackend do
 
   @impl true
   def remote_boot(%DockerBackend{parent_ref: parent_ref} = state) do
-    container_id = create_container(state)
+    container_id = create_container!(state)
 
     if state.log do
       Logger.log(
@@ -173,7 +173,7 @@ defmodule FLAME.DockerBackend do
       )
     end
 
-    case start_container(state, container_id) do
+    case start_container!(state, container_id) do
       :ok ->
         new_state = %{state | runner_container_id: container_id}
 
@@ -184,7 +184,7 @@ defmodule FLAME.DockerBackend do
           after
             state.boot_timeout ->
               Logger.error("failed to connect to docker container within #{state.boot_timeout}ms")
-              stop_container(state, container_id)
+              stop_container!(state, container_id)
               exit(:timeout)
           end
 
@@ -201,7 +201,7 @@ defmodule FLAME.DockerBackend do
     end
   end
 
-  defp create_container(%DockerBackend{} = state) do
+  defp create_container!(%DockerBackend{} = state) do
     container_name = state.runner_node_base
 
     body =
@@ -223,7 +223,7 @@ defmodule FLAME.DockerBackend do
     end
   end
 
-  defp start_container(%DockerBackend{} = state, container_id) do
+  defp start_container!(%DockerBackend{} = state, container_id) do
     case http_post!(
            "#{state.docker_host}/v#{state.docker_api_version}/containers/#{container_id}/start",
            "",
@@ -234,7 +234,7 @@ defmodule FLAME.DockerBackend do
     end
   end
 
-  defp stop_container(%DockerBackend{} = state, container_id) do
+  defp stop_container!(%DockerBackend{} = state, container_id) do
     http_post!(
       "#{state.docker_host}/v#{state.docker_api_version}/containers/#{container_id}/stop",
       "",
@@ -243,7 +243,11 @@ defmodule FLAME.DockerBackend do
   end
 
   defp http_post!(url, body, opts) do
-    headers = Keyword.fetch!(opts, :headers)
+    Keyword.validate!(opts, [:headers])
+
+    headers =
+      for {field, val} <- Keyword.fetch!(opts, :headers),
+          do: {String.to_charlist(field), val}
 
     case :httpc.request(
            :post,
@@ -255,7 +259,14 @@ defmodule FLAME.DockerBackend do
         :ok
 
       {:ok, {{_, 200, _}, _, response_body}} ->
-        JSON.decode!(response_body)
+        response_body
+        |> IO.iodata_to_binary()
+        |> JSON.decode!()
+
+      {:ok, {{_, 201, _}, _, response_body}} ->
+        response_body
+        |> IO.iodata_to_binary()
+        |> JSON.decode!()
 
       {:ok, {{_, status, reason}, _, resp_body}} ->
         raise "failed POST #{url} with #{inspect(status)} (#{inspect(reason)}): #{inspect(resp_body)}"
