@@ -210,7 +210,9 @@ defmodule FLAME.DockerBackend do
         Env: Enum.map(state.env, fn {k, v} -> "#{k}=#{v}" end),
         Name: container_name,
         ExposedPorts: %{
-          "4369/tcp" => %{}
+          "4369/tcp" => %{},
+          "9000-9010/tcp" => %{},
+          "5432/tcp" => %{}
         },
         HostConfig: %{
           AutoRemove: true,
@@ -220,6 +222,14 @@ defmodule FLAME.DockerBackend do
               # Inherits host epmd process into container
               "HostIp" => "127.0.0.1",
               "HostPort" => "4369"
+            }],
+            "9000-9010/tcp" => [%{
+              "HostIp" => "",
+              "HostPort" => "9000-9010"
+            }],
+            "5432/tcp" => [%{
+              "HostIp" => "127.0.0.1",
+              "HostPort" => "5432"
             }]
           }
         }
