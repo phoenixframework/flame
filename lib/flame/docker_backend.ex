@@ -224,7 +224,7 @@ defmodule FLAME.DockerBackend do
               "HostPort" => "4369"
             }],
             "9000-9010/tcp" => [%{
-              "HostIp" => "",
+              "HostIp" => "127.0.0.1",
               "HostPort" => "9000-9010"
             }],
             "5432/tcp" => [%{
