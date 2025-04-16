@@ -211,7 +211,6 @@ defmodule FLAME.DockerBackend do
         Name: container_name,
         ExposedPorts: %{
           "4369/tcp" => %{},
-          "9000-9010/tcp" => %{},
           "5432/tcp" => %{}
         },
         HostConfig: %{
@@ -222,10 +221,6 @@ defmodule FLAME.DockerBackend do
               # Inherits host epmd process into container
               "HostIp" => "127.0.0.1",
               "HostPort" => "4369"
-            }],
-            "9000-9010/tcp" => [%{
-              "HostIp" => "127.0.0.1",
-              "HostPort" => "9000-9010"
             }],
             "5432/tcp" => [%{
               "HostIp" => "127.0.0.1",
