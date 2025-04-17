@@ -73,7 +73,7 @@ defmodule FLAME.DockerBackend do
   iex --sname host --cookie test -S mix phx.server
   ```
 
-  Configure the Flame to use the Docker backend:
+  Configure Flame to use Docker backend:
   ```elixir
   config :flame, :backend, FLAME.DockerBackend
   config :flame, FLAME.DockerBackend,
@@ -83,7 +83,7 @@ defmodule FLAME.DockerBackend do
     }
   ```
 
-  Or configure the Docker backend per pool:
+  Or configure Docker backend per pool:
   ```elixir
   {FLAME.Pool,
     name: MyRunner,
