@@ -118,7 +118,7 @@ defmodule FLAME.DockerBackend do
       |> FLAME.Parent.encode()
 
     new_env =
-      %{"PHX_SERVER" => "false", "FLAME_PARENT" => encoded_parent}
+      %{"FLAME_PARENT" => encoded_parent}
       |> Map.merge(state.env)
       |> then(fn env ->
         if flags = System.get_env("ERL_AFLAGS") do
