@@ -1,9 +1,13 @@
 defmodule FLAME.DockerBackend do
   @moduledoc """
   A `FLAME.Backend` that runs app calls in Docker containers on the parent machine.
+  Uses Docker HTTP API to create and start containers.
 
   This backend is useful for development and testing when you want to run your code
   in isolated Docker containers but don't want to use a cloud provider like Fly.io.
+
+  It is NOT recommended (or useful) for production use. Though with some tweaking
+  it could be used via a remote Docker engine.
 
   ## Configuration
 
@@ -16,7 +20,14 @@ defmodule FLAME.DockerBackend do
   * `:docker_api_version` - The Docker API version to use. Defaults to `"1.41"`.
   * `:log` - Whether to enable logging. Defaults to `false`.
 
-  ## Example Configuration
+  ## Example Setup
+
+  Expose your Docker engine HTTP API:
+  ```bash
+  socat TCP-LISTEN:2375,reuseaddr,fork UNIX-CONNECT:/var/run/docker.sock &
+  ```
+
+  Create a dev Dockerfile for your application:
 
   ./Dockerfile.flame.dev
   ```dockerfile
@@ -52,14 +63,17 @@ defmodule FLAME.DockerBackend do
   CMD ["elixir", "--sname", "flame-dev", "--cookie", "test", "-S", "mix", "phx.server"]
   ```
 
-  Build the image:
-
+  Build the image from root directory:
   ```bash
-  docker build -t flame-dev:latest -f Dockerfile.flame.dev .
+  docker build --target dev -t flame-dev:latest -f Dockerfile.flame.dev .
   ```
 
-  Run the container:
+  Run the host application with the same cookie as the container:
+  ```bash
+  iex --sname host --cookie test -S mix phx.server
+  ```
 
+  Configure the Flame to use the Docker backend:
   ```elixir
   config :flame, :backend, FLAME.DockerBackend
   config :flame, FLAME.DockerBackend,
@@ -69,8 +83,7 @@ defmodule FLAME.DockerBackend do
     }
   ```
 
-  Or pass the env to each pool:
-
+  Or configure the Docker backend per pool:
   ```elixir
   {FLAME.Pool,
     name: MyRunner,
