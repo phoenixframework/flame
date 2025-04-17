@@ -18,13 +18,54 @@ defmodule FLAME.DockerBackend do
 
   ## Example Configuration
 
+  ./Dockerfile.flame.dev
+  ```dockerfile
+  ARG ELIXIR_VERSION=1.18.2
+  ARG OTP_VERSION=27.2.4
+  ARG DEBIAN_VERSION=bullseye-20250224-slim
+
+  ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
+
+  FROM ${BUILDER_IMAGE} AS dev
+
+  # Install development dependencies
+  RUN apt-get update -y && apt-get install -y build-essential git inotify-tools \
+      && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+  # Prepare app directory
+  WORKDIR /app
+
+  # Install hex + rebar
+  RUN mix local.hex --force && \
+      mix local.rebar --force
+
+  # Set development environment
+  ENV MIX_ENV=dev
+
+  COPY . .
+
+  RUN mix deps.get && mix deps.compile
+
+  # EPMD port for node discovery
+  EXPOSE 4369
+
+  CMD ["elixir", "--sname", "flame-dev", "--cookie", "test", "-S", "mix", "phx.server"]
+  ```
+
+  Build the image:
+
+  ```bash
+  docker build -t flame-dev:latest -f Dockerfile.flame.dev .
+  ```
+
+  Run the container:
+
   ```elixir
   config :flame, :backend, FLAME.DockerBackend
   config :flame, FLAME.DockerBackend,
-    image: "my-app:latest",
+    image: "flame-dev:latest",
     env: %{
-      "DATABASE_URL" => System.get_env("DATABASE_URL"),
-      "POOL_SIZE" => "1"
+      "DOCKER_IP" => "127.0.0.1"
     }
   ```
 
@@ -33,7 +74,7 @@ defmodule FLAME.DockerBackend do
   ```elixir
   {FLAME.Pool,
     name: MyRunner,
-    backend: {FLAME.DockerBackend, image: "my-app:latest", env: %{"DATABASE_URL" => System.get_env("DATABASE_URL")}}
+    backend: {FLAME.DockerBackend, image: "flame-dev:latest", env: %{"DOCKER_IP" => "127.0.0.1"}}
   }
   ```
   """
