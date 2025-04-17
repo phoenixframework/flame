@@ -18,6 +18,7 @@ defmodule FLAME.DockerBackend do
   * `:boot_timeout` - The boot timeout in milliseconds. Defaults to `30_000`.
   * `:docker_host` - The Docker host to connect to. Defaults to `"http://127.0.0.1:2375"`. Be sure to run `socat TCP-LISTEN:2375,reuseaddr,fork UNIX-CONNECT:/var/run/docker.sock &` to expose the Docker socket to the host via TCP.
   * `:docker_api_version` - The Docker API version to use. Defaults to `"1.41"`.
+  * `:autoremove_container` - Whether to automatically remove the container after it exits. Defaults to `true`.
   * `:log` - Whether to enable logging. Defaults to `false`.
 
   ## Example Setup
@@ -103,6 +104,7 @@ defmodule FLAME.DockerBackend do
            only: [
              :docker_host,
              :docker_api_version,
+             :autoremove_container,
              :image,
              :env,
              :boot_timeout,
@@ -116,6 +118,7 @@ defmodule FLAME.DockerBackend do
            ]}
   defstruct docker_host: nil,
             docker_api_version: nil,
+            autoremove_container: nil,
             image: nil,
             env: %{},
             boot_timeout: nil,
@@ -134,6 +137,7 @@ defmodule FLAME.DockerBackend do
     :boot_timeout,
     :docker_host,
     :docker_api_version,
+    :autoremove_container,
     :terminator_sup,
     :log
   ]
@@ -149,6 +153,7 @@ defmodule FLAME.DockerBackend do
       boot_timeout: 30_000,
       docker_host: "http://127.0.0.1:2375",
       docker_api_version: "1.41",
+      autoremove_container: true,
       log: Keyword.get(conf, :log, false)
     }
 
@@ -268,6 +273,7 @@ defmodule FLAME.DockerBackend do
           "5432/tcp" => %{}
         },
         HostConfig: %{
+          AutoRemove: state.autoremove_container,
           NetworkMode: "host",
           PortBindings: %{
             "4369/tcp" => [%{
