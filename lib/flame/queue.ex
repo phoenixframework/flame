@@ -22,7 +22,7 @@ defmodule FLAME.Queue do
   def insert(%Queue{idx: idx} = queue, item, key) do
     new_tree = :gb_trees.insert(idx, {key, item}, queue.tree)
     new_keys = Map.put(queue.keys, key, idx)
-    %Queue{queue | tree: new_tree, keys: new_keys, idx: idx + 1}
+    %{queue | tree: new_tree, keys: new_keys, idx: idx + 1}
   end
 
   @doc """
@@ -41,7 +41,7 @@ defmodule FLAME.Queue do
       {_smallest_idx, {key, val}, new_tree} = :gb_trees.take_smallest(tree)
       new_keys = Map.delete(keys, key)
       new_idx = if :gb_trees.is_empty(new_tree), do: 0, else: idx
-      {{key, val}, %Queue{queue | tree: new_tree, keys: new_keys, idx: new_idx}}
+      {{key, val}, %{queue | tree: new_tree, keys: new_keys, idx: new_idx}}
     else
       {nil, queue}
     end
@@ -103,7 +103,7 @@ defmodule FLAME.Queue do
         new_tree = :gb_trees.delete_any(index, tree)
         new_keys = Map.delete(keys, key)
         new_idx = if :gb_trees.is_empty(new_tree), do: 0, else: queue.idx
-        %Queue{queue | tree: new_tree, keys: new_keys, idx: new_idx}
+        %{queue | tree: new_tree, keys: new_keys, idx: new_idx}
 
       %{} ->
         queue

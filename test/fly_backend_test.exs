@@ -26,7 +26,7 @@ defmodule FLAME.FlyBackendTest do
     end
 
     assert_raise ArgumentError, ~r/missing :app/, fn ->
-      new({FlyBackend, token: "123", image: "img"})
+      new({FlyBackend, token: "123", image: "img", boot_timeout: 55123})
     end
 
     assert new({FlyBackend, token: "123", image: "img", app: "app"})
@@ -38,7 +38,7 @@ defmodule FLAME.FlyBackendTest do
       image: "img",
       app: "app",
       host: "foo.local",
-      env: %{one: 1},
+      env: %{"ONE" => "1"},
       cpu_kind: "performance",
       cpus: 1,
       memory_mb: 256,
@@ -54,9 +54,9 @@ defmodule FLAME.FlyBackendTest do
     assert init.gpu_kind == "a100-pcie-40gb"
 
     assert %{
-             one: 1,
-             FLAME_PARENT: _,
-             PHX_SERVER: "false"
+             "ONE" => "1",
+             "FLAME_PARENT" => _,
+             "PHX_SERVER" => "false"
            } = init.env
   end
 
@@ -80,5 +80,23 @@ defmodule FLAME.FlyBackendTest do
     Application.put_env(:flame, FLAME.FlyBackend, token: "123", image: "img", app: "app")
 
     assert Runner.new(backend: FLAME.FlyBackend)
+  end
+
+  test "parent backend attributes" do
+    assert %FLAME.Parent{
+             pid: _,
+             ref: _,
+             backend: FLAME.FlyBackend,
+             flame_vsn: vsn,
+             backend_vsn: vsn,
+             backend_app: :flame
+           } =
+             FLAME.Parent.new(
+               make_ref(),
+               self(),
+               FLAME.FlyBackend,
+               "app-flame-1",
+               "FLY_PRIVATE_IP"
+             )
   end
 end

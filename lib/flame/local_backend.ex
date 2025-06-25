@@ -1,5 +1,8 @@
 defmodule FLAME.LocalBackend do
-  @moduledoc false
+  @moduledoc """
+  A `FLAME.Backend` useful for development and testing.
+  """
+
   @behaviour FLAME.Backend
 
   @impl true
@@ -28,7 +31,7 @@ defmodule FLAME.LocalBackend do
 
       other ->
         raise ArgumentError,
-              "expected a null arity function or {mod, func, args. Got: #{inspect(other)}"
+              "expected a null arity function or {mod, func, args}. Got: #{inspect(other)}"
     end
   end
 
@@ -37,7 +40,7 @@ defmodule FLAME.LocalBackend do
 
   @impl true
   def remote_boot(state) do
-    parent = FLAME.Parent.new(make_ref(), self(), __MODULE__)
+    parent = FLAME.Parent.new(make_ref(), self(), __MODULE__, "nonode", nil)
     name = Module.concat(state.terminator_sup, to_string(System.unique_integer([:positive])))
     opts = [name: name, parent: parent, log: state.log]
 

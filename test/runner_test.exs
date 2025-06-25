@@ -4,6 +4,7 @@ defmodule FLAME.RunnerTest do
   import Mox
 
   alias FLAME.{Runner, MockBackend}
+  alias FLAME.Test.CodeSyncMock
 
   # Make sure mocks are verified when the test exits
   setup :set_mox_global
@@ -23,7 +24,7 @@ defmodule FLAME.RunnerTest do
   }
 
   defp remote_boot(state) do
-    parent = FLAME.Parent.new(make_ref(), self(), MockBackend)
+    parent = FLAME.Parent.new(make_ref(), self(), MockBackend, "app-flame-1", "MY_HOST_IP")
     name = Module.concat(FLAME.TerminatorTest, to_string(System.unique_integer([:positive])))
     opts = [name: name, parent: parent]
     spec = Supervisor.child_spec({FLAME.Terminator, opts}, restart: :temporary)
@@ -102,19 +103,19 @@ defmodule FLAME.RunnerTest do
         backend: {MockBackend, image: "my-imag", app_name: "test", api_token: "secret"}
       )
 
-    assert Runner.remote_boot(runner) == :ok
-    assert Runner.call(runner, fn -> :works end) == :works
+    assert Runner.remote_boot(runner, nil) == :ok
+    assert Runner.call(runner, self(), fn -> :works end) == {:works, []}
     assert_receive :stopped
   end
 
   test "backend success multi use" do
     {:ok, runner} = mock_successful_runner(4)
 
-    assert Runner.remote_boot(runner) == :ok
-    assert Runner.remote_boot(runner) == {:error, :already_booted}
-    assert Runner.call(runner, fn -> :works end) == :works
+    assert Runner.remote_boot(runner, nil) == :ok
+    assert Runner.remote_boot(runner, nil) == {:error, :already_booted}
+    assert Runner.call(runner, self(), fn -> :works end) == {:works, []}
     refute_receive :stopped
-    assert Runner.call(runner, fn -> :still_works end) == :still_works
+    assert Runner.call(runner, self(), fn -> :still_works end) == {:still_works, []}
     ref = Process.monitor(runner)
     assert Runner.shutdown(runner) == :ok
     assert_receive :stopped
@@ -132,7 +133,7 @@ defmodule FLAME.RunnerTest do
       )
 
     assert {:exit, {{:shutdown, :invalid_authentication}, _}} =
-             wrap_exit(runner, fn -> Runner.remote_boot(runner) end)
+             wrap_exit(runner, fn -> Runner.remote_boot(runner, nil) end)
   end
 
   test "backend runner boot failure" do
@@ -146,14 +147,14 @@ defmodule FLAME.RunnerTest do
       )
 
     assert {:exit, {{:shutdown, :nxdomain}, _}} =
-             wrap_exit(runner, fn -> Runner.remote_boot(runner) end)
+             wrap_exit(runner, fn -> Runner.remote_boot(runner, nil) end)
   end
 
   describe "execution failure" do
     test "single use" do
       {:ok, runner} = mock_successful_runner(3, single_use: true)
-      assert Runner.remote_boot(runner) == :ok
-      error = wrap_exit(runner, fn -> Runner.call(runner, fn -> raise "boom" end) end)
+      assert Runner.remote_boot(runner, nil) == :ok
+      error = wrap_exit(runner, fn -> Runner.call(runner, self(), fn -> raise "boom" end) end)
       assert {:exit, {%RuntimeError{message: "boom"}, _}} = error
       assert_receive :stopped
       assert Runner.shutdown(runner) == :ok
@@ -162,13 +163,13 @@ defmodule FLAME.RunnerTest do
     test "multi use" do
       {:ok, runner} = mock_successful_runner(4)
       Process.monitor(runner)
-      assert Runner.remote_boot(runner) == :ok
+      assert Runner.remote_boot(runner, nil) == :ok
 
-      error = wrap_exit(runner, fn -> Runner.call(runner, fn -> raise "boom" end) end)
+      error = wrap_exit(runner, fn -> Runner.call(runner, self(), fn -> raise "boom" end) end)
       assert {:exit, {%RuntimeError{message: "boom"}, _}} = error
       refute_receive :stopped
       refute_receive {:DOWN, _ref, :process, ^runner, _}
-      assert Runner.call(runner, fn -> :works end) == :works
+      assert Runner.call(runner, self(), fn -> :works end) == {:works, []}
       assert Runner.shutdown(runner) == :ok
     end
   end
@@ -179,10 +180,12 @@ defmodule FLAME.RunnerTest do
       {:ok, runner} = mock_successful_runner(3, timeout: timeout, single_use: true)
 
       Process.monitor(runner)
-      assert Runner.remote_boot(runner) == :ok
+      assert Runner.remote_boot(runner, nil) == :ok
 
       error =
-        wrap_exit(runner, fn -> Runner.call(runner, fn -> Process.sleep(timeout * 2) end) end)
+        wrap_exit(runner, fn ->
+          Runner.call(runner, self(), fn -> Process.sleep(timeout * 2) end)
+        end)
 
       assert error == {:exit, :timeout}
 
@@ -196,16 +199,18 @@ defmodule FLAME.RunnerTest do
       {:ok, runner} = mock_successful_runner(4, timeout: timeout)
 
       Process.monitor(runner)
-      assert Runner.remote_boot(runner) == :ok
+      assert Runner.remote_boot(runner, nil) == :ok
 
       error =
-        wrap_exit(runner, fn -> Runner.call(runner, fn -> Process.sleep(timeout * 2) end) end)
+        wrap_exit(runner, fn ->
+          Runner.call(runner, self(), fn -> Process.sleep(timeout * 2) end)
+        end)
 
       assert error == {:exit, :timeout}
 
       refute_receive :stopped
       refute_receive {:DOWN, _ref, :process, ^runner, _}
-      assert Runner.call(runner, fn -> :works end, 1234) == :works
+      assert Runner.call(runner, self(), fn -> :works end, timeout: 1234) == {:works, []}
       assert Runner.shutdown(runner) == :ok
     end
   end
@@ -217,7 +222,7 @@ defmodule FLAME.RunnerTest do
 
       Process.unlink(runner)
       Process.monitor(runner)
-      assert Runner.remote_boot(runner) == :ok
+      assert Runner.remote_boot(runner, nil) == :ok
 
       assert_receive :stopped, timeout * 2
       assert_receive {:DOWN, _ref, :process, ^runner, _}
@@ -225,8 +230,8 @@ defmodule FLAME.RunnerTest do
       {:ok, runner} = mock_successful_runner(2, idle_shutdown_after: timeout)
       Process.unlink(runner)
       Process.monitor(runner)
-      assert Runner.remote_boot(runner) == :ok
-      assert Runner.call(runner, fn -> :works end) == :works
+      assert Runner.remote_boot(runner, nil) == :ok
+      assert Runner.call(runner, self(), fn -> :works end) == {:works, []}
       assert_receive :stopped, timeout * 2
       assert_receive {:DOWN, _ref, :process, ^runner, _}
     end
@@ -239,12 +244,43 @@ defmodule FLAME.RunnerTest do
 
       Process.unlink(runner)
       Process.monitor(runner)
-      assert Runner.remote_boot(runner) == :ok
+      assert Runner.remote_boot(runner, nil) == :ok
 
       refute_receive {:DOWN, _ref, :process, ^runner, _}, timeout * 2
       Agent.update(agent, fn _ -> true end)
       assert_receive :stopped, timeout * 2
       assert_receive {:DOWN, _ref, :process, ^runner, _}
+    end
+  end
+
+  describe "code_sync" do
+    test "copy_paths: true, copies the code paths and extracts on boot" do
+      mock = CodeSyncMock.new()
+      # the 4th invocation is the rpc to diff code paths
+      code_sync = FLAME.CodeSync.new(mock.opts)
+      stream = FLAME.CodeSync.package_to_stream(code_sync)
+
+      {:ok, runner} = mock_successful_runner(4, code_sync: mock.opts)
+
+      Process.monitor(runner)
+      assert Runner.remote_boot(runner, stream) == :ok
+      assert Runner.call(runner, self(), fn -> :works end, timeout: 1234) == {:works, []}
+      assert Runner.shutdown(runner) == :ok
+      # called on remote boot
+      assert_receive {CodeSyncMock, {_mock, :extract}}
+
+      # called on :works call
+      assert_receive {CodeSyncMock, {_mock, :extract}}
+    end
+
+    test "noops by default" do
+      {:ok, runner} = mock_successful_runner(3)
+
+      Process.monitor(runner)
+      assert Runner.remote_boot(runner, nil) == :ok
+      assert Runner.call(runner, self(), fn -> :works end, timeout: 1234) == {:works, []}
+      assert Runner.shutdown(runner) == :ok
+      refute_receive {CodeSyncMock, _}
     end
   end
 end

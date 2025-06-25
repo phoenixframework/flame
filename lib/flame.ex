@@ -21,12 +21,12 @@ defmodule FLAME do
   web requests, etc, to come to crawl. This is where folks typically reach for
   FaaS or external service solutions, but FLAME gives you a better way.
 
-  Simply wrap your your existing code in a FLAME function and it will be executed
-  on a newly spawned, ephemeral node. Using Elixir and Erlang's built in distribution
+  Simply wrap your existing code in a FLAME function and it will be executed
+  on a newly spawned, ephemeral node. Using Elixir and Erlang's built-in distribution
   features, entire function closures, including any state they close over, can be sent
   and executed on a remote node:
 
-      def resize_video_quality(%Video{} = video) do
+      def resize_video_quality(%Video{} = vid) do
         FLAME.call(MyApp.FFMpegRunner, fn ->
           path = "#{vid.id}_720p.mp4"
           System.cmd("ffmpeg", ~w(-i #{vid.url} -s 720x480 -c:a copy #{path}))
@@ -49,7 +49,7 @@ defmodule FLAME do
   ## Pools
 
   A `FLAME.Pool` provides elastic runner scaling, allowing a minimum and
-  maximum number of runners to be configured, and idle'd down as load decreases.
+  maximum number of runners to be configured, and idled down as load decreases.
 
   Pools give you elastic scale that maximizes the newly spawned hardware.
   At the same time, you also want to avoid spawning unbound resources. You also
@@ -60,7 +60,7 @@ defmodule FLAME do
       children = [
         ...,
         {FLAME.Pool,
-         name: App.FFMpegRunner,
+         name: MyApp.FFMpegRunner,
          min: 0,
          max: 10,
          max_concurrency: 5,
@@ -68,14 +68,14 @@ defmodule FLAME do
       ]
 
   Here we add a `FLAME.Pool` to our application supervision tree, configuring
-  a minimum of 0 and maximum of 10 runners. This acheives "scale to zero" behavior
+  a minimum of 0 and maximum of 10 runners. This achieves "scale to zero" behavior
   while also allowing the pool to scale up to 10 runners when load increases.
   Each runner in the case will be able to execute up to 5 concurrent functions.
-  The runners will shutdown after 30 seconds of inactivity.
+  The runners will shut down after 30 seconds of inactivity.
 
   Calling a pool is as simple as passing its name to the FLAME functions:
 
-      FLAME.call(App.FFMpegRunner, fn -> :operation1 end)
+      FLAME.call(MyApp.FFMpegRunner, fn -> :operation1 end)
 
   You'll also often want to enable or disable other application services based on whether
   your application is being started as child FLAME runner or being run directly.
@@ -92,7 +92,7 @@ defmodule FLAME do
   your existing pool size.
 
   To accomplish these you can use `FLAME.Parent.get/0` to conditionally enable or
-  disable processes in you `application.ex` file:
+  disable processes in your `application.ex` file:
 
       def start(_type, _args) do
         flame_parent = FLAME.Parent.get()
@@ -151,7 +151,7 @@ defmodule FLAME do
         ...
       end
 
-  ## Termination
+  ## Termination and remote links
 
   FLAME runs a termination process to allow remotely spawned functions time to
   complete before the node is terminated. This process is started automatically
@@ -159,6 +159,13 @@ defmodule FLAME do
   in your application configuration, such as `config/runtime.exs`:
 
       config :flame, :terminator, shutdown_timeout: :timer.seconds(10)
+
+  *Note*: By default `call/3`, `cast/3`, and `place_child/3` will link the caller
+  to the remote process to prevent orphaned resources when the caller or the caller's node
+  is terminated. This can be disabled by passing `link: false` to the options, which is
+  useful for cases where you want to allow long-running work to complete within the
+  `:shutdown_timeout` of the remote runner, regardless of what happens to the parent caller
+  process and/or the parent caller node, such as a new cold deploy, a caller crash, etc.
   """
   require Logger
 
@@ -172,33 +179,51 @@ defmodule FLAME do
       The executed function will also be terminated on the remote flame if
       the timeout is reached.
 
+    * `:link` – Whether the caller should be linked to the remote call process
+      to prevent long-running orphaned resources. Defaults to `true`. Set to `false` to
+      support long-running work that you want to complete within the `:shutdown_timeout`
+      of the remote runner, even when the parent process or node is terminated.
+      *Note*: even when `link: false` is used, an exit in the remote process will raise
+      an error on the caller. The caller will need to try/catch the call if they wish
+      to handle the error.
+
+    * `:track_resources` - When true, traverses the returned result looking for
+      resources that implement the `FLAME.Trackable` protocol and make sure the
+      FLAME node does not terminate until the tracked resources are removed.
+
   ## Examples
 
-    def my_expensive_thing(arg) do
-      FLAME.call(MyApp.Runner, fn ->
-        # I'm now doing expensive work inside a new node
-        # pubsub and repo access all just work
-        Phoenix.PubSub.broadcast(MyApp.PubSub, "topic", result)
+      def my_expensive_thing(arg) do
+        FLAME.call(MyApp.Runner, fn ->
+          # I'm now doing expensive work inside a new node
+          # pubsub and repo access all just work
+          Phoenix.PubSub.broadcast(MyApp.PubSub, "topic", result)
 
-        # can return awaitable results back to caller
-        result
-      end)
+          # can return awaitable results back to caller
+          result
+        end)
+      end
 
   When the caller exits, the remote runner will be terminated.
   """
-  def call(pool, func, opts) when is_atom(pool) and is_function(func, 0) and is_list(opts) do
+  def call(pool, func, opts \\ [])
+      when is_atom(pool) and is_function(func, 0) and is_list(opts) do
     FLAME.Pool.call(pool, func, opts)
-  end
-
-  def call(pool, func) when is_atom(pool) and is_function(func, 0) do
-    FLAME.Pool.call(pool, func, [])
   end
 
   @doc """
   Casts a function to a remote runner for the given `FLAME.Pool`.
+
+  ## Options
+
+    * `:link` – Whether the caller should be linked to the remote cast process
+      to prevent long-running orphaned resources. Defaults to `true`. Set to `false` to
+      support long-running work that you want to complete within the `:shutdown_timeout`
+      of the remote runner, even when the parent process or node is terminated.
   """
-  def cast(pool, func) when is_atom(pool) and is_function(func, 0) do
-    FLAME.Pool.cast(pool, func)
+  def cast(pool, func, opts \\ [])
+      when is_atom(pool) and is_function(func, 0) and is_list(opts) do
+    FLAME.Pool.cast(pool, func, opts)
   end
 
   @doc """
@@ -217,6 +242,18 @@ defmodule FLAME do
   exits. If you want restart behavior, you need to monitor on the parent node and
   replace the child yourself.
 
+  ## Options
+
+    * `:timeout` - The timeout the caller is willing to wait for a response before an
+      exit with `:timeout`. Defaults to the configured timeout of the pool.
+      The executed function will also be terminated on the remote flame if
+      the timeout is reached.
+
+    * `:link` – Whether the caller should be linked to the remote child process
+      to prevent long-running orphaned resources. Defaults to `true`. Set to `false` to
+      support long-running work that you want to complete within the `:shutdown_timeout`
+      of the remote runner, even when the parent process or node is terminated.
+
   Accepts any child spec.
 
   ## Examples
@@ -225,5 +262,52 @@ defmodule FLAME do
   """
   def place_child(pool, child_spec, opts \\ []) when is_atom(pool) and is_list(opts) do
     FLAME.Pool.place_child(pool, child_spec, opts)
+  end
+
+  @doc """
+  Callback invoked to recursively track resources
+  on a given node.
+
+  Sometimes we may want to allocate long lived resources
+  in a FLAME but, because FLAME nodes are temporary, the
+  node would terminate shortly after. The `:track_resources`
+  option tells `FLAME` to look for resources which implement
+  the `FLAME.Trackable` protocol. Those resources can then
+  spawn PIDs in the remote node and tell FLAME to track them.
+  Once all PIDs terminate, the FLAME node will terminate too.
+
+  The `data` is any data type, `acc` is a list of PIDs
+  (typicalling starts as an empty list), and the `node`
+  we have received the resources from. See `FLAME.Trackable`
+  for customization.
+  """
+  def track_resources(data, acc, node)
+
+  def track_resources(tuple, acc, node) when is_tuple(tuple) do
+    {list, acc} = tuple |> Tuple.to_list() |> track_resources(acc, node)
+    {List.to_tuple(list), acc}
+  end
+
+  def track_resources(list, acc, node) when is_list(list) do
+    Enum.map_reduce(list, acc, &track_resources(&1, &2, node))
+  end
+
+  def track_resources(%_{} = other, acc, node) do
+    FLAME.Trackable.track(other, acc, node)
+  end
+
+  def track_resources(%{} = map, acc, node) do
+    {pairs, acc} =
+      Enum.map_reduce(map, acc, fn {k, v}, acc ->
+        {k, acc} = track_resources(k, acc, node)
+        {v, acc} = track_resources(v, acc, node)
+        {{k, v}, acc}
+      end)
+
+    {Map.new(pairs), acc}
+  end
+
+  def track_resources(other, acc, _node) do
+    {other, acc}
   end
 end

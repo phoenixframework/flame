@@ -4,8 +4,8 @@ defmodule FLAME.Runner.MixProject do
   def project do
     [
       app: :flame,
-      version: "0.1.7",
-      elixir: "~> 1.14",
+      version: "0.5.2",
+      elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -33,7 +33,7 @@ defmodule FLAME.Runner.MixProject do
   def application do
     [
       mod: {FLAME.Application, []},
-      extra_applications: [:logger]
+      extra_applications: [:logger, inets: :optional, ssl: :optional]
     ]
   end
 
@@ -43,7 +43,8 @@ defmodule FLAME.Runner.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:req, "~> 0.4.5"},
+      {:jason, ">= 0.0.0", optional: true},
+      {:castore, ">= 0.0.0", optional: true},
       {:mox, "~> 1.1.0", only: :test},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]

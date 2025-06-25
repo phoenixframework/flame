@@ -1,4 +1,6 @@
 defmodule FLAME.Terminator.Supervisor do
+  @moduledoc false
+
   use Supervisor
 
   def start_link(opts) do
@@ -16,6 +18,7 @@ defmodule FLAME.Terminator.Supervisor do
   end
 
   def init(opts) do
+    {shutdown_timeout, opts} = Keyword.pop(opts, :shutdown_timeout, 30_000)
     name = Keyword.fetch!(opts, :name)
     child_placement_sup = child_placement_sup_name(name)
     terminator_opts = Keyword.merge(opts, child_placement_sup: child_placement_sup)
@@ -27,7 +30,7 @@ defmodule FLAME.Terminator.Supervisor do
           id: FLAME.Terminator,
           start: {FLAME.Terminator, :start_link, [terminator_opts]},
           type: :worker,
-          shutdown: opts[:shutdown_timeout] || 30_000
+          shutdown: shutdown_timeout
         }
       ]
 

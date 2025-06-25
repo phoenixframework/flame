@@ -1,5 +1,7 @@
 defmodule FLAME.Terminator.Caller do
-  defstruct from_pid: nil, timer: nil, placed_child_ref: nil, placed_caller_ref: nil
+  @moduledoc false
+
+  defstruct from_pid: nil, timer: nil, placed_child_ref: nil, placed_caller_ref: nil, link?: false
 end
 
 defmodule FLAME.Terminator do
@@ -29,6 +31,8 @@ defmodule FLAME.Terminator do
             child_placement_sup: nil,
             single_use: false,
             calls: %{},
+            watchers: %{},
+            paths: [],
             log: false,
             status: nil,
             failsafe_timer: nil,
@@ -66,6 +70,14 @@ defmodule FLAME.Terminator do
     GenServer.start_link(__MODULE__, opts, name: opts[:name])
   end
 
+  def watch(terminator, pids) do
+    GenServer.call(terminator, {:watch, pids})
+  end
+
+  def watch_path(terminator, path) do
+    GenServer.call(terminator, {:watch_path, path})
+  end
+
   def deadline_me(terminator, timeout) do
     GenServer.call(terminator, {:deadline, timeout})
   end
@@ -78,11 +90,15 @@ defmodule FLAME.Terminator do
     GenServer.call(terminator, :system_shutdown)
   end
 
-  def place_child(terminator, caller, child_spec) when is_pid(caller) do
+  def place_child(terminator, caller, link?, child_spec)
+      when is_pid(caller) and is_boolean(link?) do
     dynamic_sup = FLAME.Terminator.Supervisor.child_placement_sup_name(terminator)
     %{start: start} = child_spec = Supervisor.child_spec(child_spec, [])
     gl = Process.group_leader()
-    rewritten_start = {__MODULE__, :start_child_inside_sup, [start, terminator, caller, gl]}
+
+    rewritten_start =
+      {__MODULE__, :start_child_inside_sup, [start, terminator, caller, link?, gl]}
+
     wrapped_child_spec = %{child_spec | start: rewritten_start}
     DynamicSupervisor.start_child(dynamic_sup, wrapped_child_spec)
   end
@@ -92,7 +108,7 @@ defmodule FLAME.Terminator do
   # the DynamicSupervisor child inside the child placement supervisor, and notifies the
   # terminator via the {:placed_child, caller, child_pid} message.
   # This approach allows the caller to place the child outside of terminator, safely.
-  def start_child_inside_sup({mod, fun, args}, terminator, caller, gl) do
+  def start_child_inside_sup({mod, fun, args}, terminator, caller, link?, gl) do
     # We switch the group leader, so that the newly started
     # process gets the same group leader as the caller
     initial_gl = Process.group_leader()
@@ -106,7 +122,7 @@ defmodule FLAME.Terminator do
           resp -> {resp, nil}
         end
 
-      if pid, do: GenServer.call(terminator, {:placed_child, caller, pid})
+      if pid, do: GenServer.call(terminator, {:placed_child, caller, pid, link?})
 
       resp
     after
@@ -141,7 +157,8 @@ defmodule FLAME.Terminator do
           parent: parent,
           calls: %{},
           log: log,
-          failsafe_timer: failsafe_timer
+          failsafe_timer: failsafe_timer,
+          idle_shutdown_timer: {nil, nil}
         }
 
         log(state, "starting with parent #{inspect(parent)}")
@@ -178,13 +195,17 @@ defmodule FLAME.Terminator do
   end
 
   def handle_info({:DOWN, ref, :process, pid, reason}, %Terminator{} = state) do
-    if state.parent && state.parent.pid == pid do
-      new_state =
-        system_stop(state, "parent pid #{inspect(pid)} went away #{inspect(reason)}. Going down")
+    case state do
+      %{parent: %{pid: ^pid}} ->
+        message = "parent pid #{inspect(pid)} went away #{inspect(reason)}. Going down"
+        {:noreply, system_stop(state, message)}
 
-      {:noreply, new_state}
-    else
-      {:noreply, drop_caller(state, ref)}
+      %{watchers: %{^ref => _} = watchers} ->
+        state = %{state | watchers: Map.delete(watchers, ref)}
+        {:noreply, maybe_schedule_shutdown(state)}
+
+      %{} ->
+        {:noreply, drop_caller(state, ref)}
     end
   end
 
@@ -210,8 +231,10 @@ defmodule FLAME.Terminator do
     {:noreply, new_state}
   end
 
-  def handle_info(:idle_shutdown, %Terminator{parent: parent} = state) do
-    if state.idle_shutdown_check.() do
+  def handle_info({:idle_shutdown, timer_ref}, %Terminator{parent: parent} = state) do
+    {_current_timer, current_timer_ref} = state.idle_shutdown_timer
+
+    if timer_ref == current_timer_ref && state.idle_shutdown_check.() do
       send_parent(parent, {:remote_shutdown, :idle})
       new_state = system_stop(state, "idle shutdown")
       {:noreply, new_state}
@@ -221,16 +244,32 @@ defmodule FLAME.Terminator do
   end
 
   @impl true
-  def handle_call({:placed_child, caller, child_pid}, _from, %Terminator{} = state) do
+  def handle_call({:placed_child, caller, child_pid, link?}, _from, %Terminator{} = state) do
     {child_ref, new_state} = deadline_caller(state, child_pid, :infinity)
     {caller_ref, new_state} = deadline_caller(new_state, caller, :infinity)
 
     new_state =
       new_state
-      |> update_caller(child_ref, fn child -> %Caller{child | placed_caller_ref: caller_ref} end)
-      |> update_caller(caller_ref, fn caller -> %Caller{caller | placed_child_ref: child_ref} end)
+      |> update_caller(child_ref, fn child ->
+        %{child | placed_caller_ref: caller_ref, link?: link?}
+      end)
+      |> update_caller(caller_ref, fn caller ->
+        %{caller | placed_child_ref: child_ref, link?: link?}
+      end)
 
     {:reply, {:ok, child_pid}, new_state}
+  end
+
+  def handle_call({:watch, pids}, _from, %Terminator{watchers: watchers} = state) do
+    watchers =
+      Enum.reduce(pids, watchers, fn pid, acc -> Map.put(acc, Process.monitor(pid), []) end)
+
+    state = %{state | watchers: watchers}
+    {:reply, :ok, cancel_idle_shutdown(state)}
+  end
+
+  def handle_call({:watch_path, path}, _from, %Terminator{watchers: paths} = state) do
+    {:reply, :ok, %{state | paths: [path | paths]}}
   end
 
   def handle_call(:system_shutdown, _from, %Terminator{} = state) do
@@ -248,7 +287,7 @@ defmodule FLAME.Terminator do
         _from,
         %Terminator{} = state
       ) do
-    new_state = %Terminator{
+    new_state = %{
       state
       | single_use: single_use?,
         idle_shutdown_after: idle_after,
@@ -258,12 +297,21 @@ defmodule FLAME.Terminator do
     {:reply, :ok, schedule_idle_shutdown(new_state)}
   end
 
+  defp clean_up_paths(paths) do
+    for path <- paths do
+      File.rm_rf(path)
+    end
+  end
+
   @impl true
   def terminate(_reason, %Terminator{} = state) do
     state =
       state
       |> cancel_idle_shutdown()
       |> system_stop("terminating")
+
+    # clean up any paths that were watched before waiting to not be killed
+    clean_up_paths(state.paths)
 
     # supervisor will force kill us if we take longer than configured shutdown_timeout
     Enum.each(state.calls, fn
@@ -280,7 +328,7 @@ defmodule FLAME.Terminator do
 
   defp update_caller(%Terminator{} = state, ref, func)
        when is_reference(ref) and is_function(func, 1) do
-    %Terminator{state | calls: Map.update!(state.calls, ref, func)}
+    %{state | calls: Map.update!(state.calls, ref, func)}
   end
 
   defp deadline_caller(%Terminator{} = state, from_pid, timeout)
@@ -295,27 +343,31 @@ defmodule FLAME.Terminator do
       end
 
     caller = %Caller{from_pid: from_pid, timer: timer}
-    new_state = %Terminator{state | calls: Map.put(state.calls, ref, caller)}
+    new_state = %{state | calls: Map.put(state.calls, ref, caller)}
     {ref, cancel_idle_shutdown(new_state)}
   end
 
   defp drop_caller(%Terminator{} = state, ref) when is_reference(ref) do
     %{^ref => %Caller{} = caller} = state.calls
     if caller.timer, do: Process.cancel_timer(caller.timer)
-    state = %Terminator{state | calls: Map.delete(state.calls, ref)}
+    state = %{state | calls: Map.delete(state.calls, ref)}
 
-    # if the caller going down was one that placed a child, and the child is still tracked,
-    # terminate the child. there is no need to notify the og caller, as they linked themselves.
+    # if the caller going down was one that placed a child, and the child is still tracked:
+    #  - if the child is not linked (link: false), do nothing
+    #  - if the child is linked, terminate the child. there is no need to notify the og caller,
+    #   as they linked themselves.
+    #
     # Note: there is also a race where we can't rely on the link to have happened to so we
     # must monitor in the terminator even with the remote link
     state =
       with placed_child_ref <- caller.placed_child_ref,
            true <- is_reference(placed_child_ref),
-           %{^placed_child_ref => %Caller{} = placed_child} <- state.calls do
+           %{^placed_child_ref => %Caller{} = placed_child} <- state.calls,
+           true <- placed_child.link? do
         if placed_child.timer, do: Process.cancel_timer(placed_child.timer)
         Process.demonitor(placed_child_ref, [:flush])
         DynamicSupervisor.terminate_child(state.child_placement_sup, placed_child.from_pid)
-        %Terminator{state | calls: Map.delete(state.calls, placed_child_ref)}
+        %{state | calls: Map.delete(state.calls, placed_child_ref)}
       else
         _ -> state
       end
@@ -327,7 +379,7 @@ defmodule FLAME.Terminator do
            %{^placed_caller_ref => %Caller{} = placed_caller} <- state.calls do
         if placed_caller.timer, do: Process.cancel_timer(placed_caller.timer)
         Process.demonitor(placed_caller_ref, [:flush])
-        %Terminator{state | calls: Map.delete(state.calls, placed_caller_ref)}
+        %{state | calls: Map.delete(state.calls, placed_caller_ref)}
       else
         _ -> state
       end
@@ -339,7 +391,11 @@ defmodule FLAME.Terminator do
         state
       end
 
-    if map_size(state.calls) == 0 do
+    maybe_schedule_shutdown(state)
+  end
+
+  defp maybe_schedule_shutdown(%{calls: calls, watchers: watchers} = state) do
+    if map_size(calls) == 0 and map_size(watchers) == 0 do
       schedule_idle_shutdown(state)
     else
       state
@@ -351,17 +407,19 @@ defmodule FLAME.Terminator do
 
     case state.idle_shutdown_after do
       time when time in [nil, :infinity] ->
-        %Terminator{state | idle_shutdown_timer: nil}
+        %{state | idle_shutdown_timer: {nil, make_ref()}}
 
       time when is_integer(time) ->
-        timer = Process.send_after(self(), :idle_shutdown, time)
-        %Terminator{state | idle_shutdown_timer: timer}
+        timer_ref = make_ref()
+        timer = Process.send_after(self(), {:idle_shutdown, timer_ref}, time)
+        %{state | idle_shutdown_timer: {timer, timer_ref}}
     end
   end
 
   defp cancel_idle_shutdown(%Terminator{} = state) do
-    if state.idle_shutdown_timer, do: Process.cancel_timer(state.idle_shutdown_timer)
-    %Terminator{state | idle_shutdown_timer: nil}
+    {timer, _ref} = state.idle_shutdown_timer
+    if timer, do: Process.cancel_timer(timer)
+    %{state | idle_shutdown_timer: {nil, make_ref()}}
   end
 
   defp connect(%Terminator{parent: %Parent{} = parent} = state) do
@@ -377,7 +435,7 @@ defmodule FLAME.Terminator do
 
       send_parent(parent, {:remote_up, self()})
 
-      %Terminator{
+      %{
         state
         | status: :connected,
           parent_monitor_ref: ref,
@@ -386,7 +444,7 @@ defmodule FLAME.Terminator do
           connect_attempts: new_attempts
       }
     else
-      %Terminator{
+      %{
         state
         | connect_timer: Process.send_after(self(), :connect, 100),
           connect_attempts: new_attempts
@@ -400,7 +458,7 @@ defmodule FLAME.Terminator do
       parent.backend.system_shutdown()
     end
 
-    %Terminator{state | status: :stopping}
+    %{state | status: :stopping}
   end
 
   defp log(%Terminator{log: level}, message) do
