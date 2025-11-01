@@ -304,15 +304,13 @@ defmodule FLAME.CodeSync do
 
   defp lookup_copy_paths_files(paths) do
     paths
-    |> Stream.map(fn parent_dir ->
+    |> Stream.flat_map(fn parent_dir ->
       if File.regular?(parent_dir, [:raw]) do
-        parent_dir
+        [parent_dir]
       else
-        Path.join(parent_dir, "**", match_dot: true)
+        Path.wildcard(Path.join(parent_dir, "**"), match_dot: true)
       end
     end)
-    |> Stream.uniq()
-    |> Stream.flat_map(fn glob -> Path.wildcard(glob) end)
     |> Stream.uniq()
     |> Enum.filter(fn path -> File.regular?(path, [:raw]) end)
   end
