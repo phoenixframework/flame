@@ -308,7 +308,7 @@ defmodule FLAME.CodeSync do
       if File.regular?(parent_dir, [:raw]) do
         parent_dir
       else
-        Path.join(parent_dir, "*")
+        Path.join(parent_dir, "**", match_dot: true)
       end
     end)
     |> Stream.uniq()

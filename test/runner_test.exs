@@ -254,7 +254,7 @@ defmodule FLAME.RunnerTest do
   end
 
   describe "code_sync" do
-    test "copy_paths: true, copies the code paths and extracts on boot" do
+    test "copies code paths and extracts on boot" do
       mock = CodeSyncMock.new()
       # the 4th invocation is the rpc to diff code paths
       code_sync = FLAME.CodeSync.new(mock.opts)
