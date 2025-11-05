@@ -29,6 +29,7 @@ defmodule FLAME.Runner do
              :id,
              :backend,
              :terminator,
+             :terminator_sup,
              :instance_id,
              :private_ip,
              :node_name,
@@ -45,6 +46,7 @@ defmodule FLAME.Runner do
             instance_id: nil,
             private_ip: nil,
             backend: nil,
+            terminator_sup: nil,
             terminator: nil,
             backend_init: nil,
             node_name: nil,
@@ -385,6 +387,7 @@ defmodule FLAME.Runner do
         shutdown_timeout: opts[:shutdown_timeout] || 30_000,
         idle_shutdown_after: idle_shutdown_after_ms,
         idle_shutdown_check: idle_check,
+        terminator_sup: opts[:terminator_sup],
         terminator: nil,
         code_sync_opts: Keyword.get(opts, :code_sync, false)
       }
