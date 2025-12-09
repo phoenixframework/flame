@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.3 (2025-12-09)
+
+### Bug Fixes
+- Include all files in copy paths
+
+### Enhancements
+- Fix warnings on Elixir v1.19
+- Clean up code_sync artifacts in extract_dir
+
 ## 0.5.2 (2024-12-06)
 
 ### Enhancements
