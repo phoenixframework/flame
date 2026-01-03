@@ -31,6 +31,8 @@ defmodule FLAME.FlyBackend do
 
   * `:gpu_kind` - The type of GPU reservation to make.
 
+  * `:mounts` - The type of GPU reservation to make.
+
   * `:gpus` - The number of runner GPUs. Defaults to `1` if `:gpu_kind` is set.
 
   * `:boot_timeout` - The boot timeout. Defaults to `30_000`.
@@ -98,6 +100,7 @@ defmodule FLAME.FlyBackend do
              :cpus,
              :memory_mb,
              :gpu_kind,
+             :mounts,
              :gpus,
              :image,
              :app,
@@ -119,6 +122,7 @@ defmodule FLAME.FlyBackend do
             cpus: nil,
             memory_mb: nil,
             gpu_kind: nil,
+            mounts: [],
             gpus: nil,
             image: nil,
             services: [],
@@ -148,6 +152,7 @@ defmodule FLAME.FlyBackend do
     :cpus,
     :memory_mb,
     :gpu_kind,
+    :mounts,
     :gpus,
     :boot_timeout,
     :env,
@@ -173,6 +178,7 @@ defmodule FLAME.FlyBackend do
       memory_mb: 4096,
       boot_timeout: 30_000,
       services: [],
+      mounts: [],
       metadata: %{},
       init: %{},
       log: Keyword.get(conf, :log, false)
@@ -250,8 +256,64 @@ defmodule FLAME.FlyBackend do
     {result, div(micro, 1000)}
   end
 
+  defp get_volume_id(%FlyBackend{mounts: []}), do: {nil, 0}
+
+  defp get_volume_id(%FlyBackend{mounts: mounts} = state) when is_list(mounts) do
+    {volumes, time} = get_volumes(state)
+
+    case volumes do
+      [] ->
+        {:error, "no volumes to mount"}
+
+      all_volumes ->
+        volume_ids_by_name =
+          all_volumes
+          |> Enum.filter(fn vol ->
+            vol["attached_machine_id"] == nil and
+              vol["state"] == "created"
+          end)
+          |> Enum.group_by(& &1["name"], & &1["id"])
+
+        new_mounts =
+          Enum.map_reduce(
+            mounts,
+            volume_ids_by_name,
+            fn mount, leftover_vols ->
+              case List.wrap(leftover_vols[mount.name]) do
+                [] ->
+                  raise ArgumentError,
+                        "not enough fly volumes with the name \"#{mount.name}\" to a FLAME child"
+
+                [volume_id | rest] ->
+                  {%{mount | volume: volume_id}, %{leftover_vols | mount.name => rest}}
+              end
+            end
+          )
+
+        {new_mounts, time}
+    end
+  end
+
+  defp get_volume_id(_) do
+    raise ArgumentError, "expected a list of mounts"
+  end
+
+  defp get_volumes(%FlyBackend{} = state) do
+    {vols, get_vols_time} =
+      with_elapsed_ms(fn ->
+        Req.get!("#{state.host}/v1/apps/#{state.app}/volumes",
+          connect_options: [timeout: state.boot_timeout],
+          retry: false,
+          auth: {:bearer, state.token}
+        )
+      end)
+
+    {vols.body, get_vols_time}
+  end
+
   @impl true
   def remote_boot(%FlyBackend{parent_ref: parent_ref} = state) do
+    {mounts, volume_validate_time} = get_volume_id(state)
     {resp, req_connect_time} =
       with_elapsed_ms(fn ->
         http_post!("#{state.host}/v1/apps/#{state.app}/machines", @retry,
@@ -267,6 +329,7 @@ defmodule FLAME.FlyBackend do
               region: state.region,
               config: %{
                 image: state.image,
+                mounts: mounts,
                 init: state.init,
                 guest: %{
                   cpu_kind: state.cpu_kind,
@@ -292,7 +355,7 @@ defmodule FLAME.FlyBackend do
       )
     end
 
-    remaining_connect_window = state.boot_timeout - req_connect_time
+    remaining_connect_window = state.boot_timeout - req_connect_time - volume_validate_time
 
     case resp do
       %{"id" => id, "instance_id" => instance_id, "private_ip" => ip} ->
