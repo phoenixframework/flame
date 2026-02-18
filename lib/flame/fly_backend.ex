@@ -16,7 +16,7 @@ defmodule FLAME.FlyBackend do
   To set your `FLY_API_TOKEN` secret, you can run the following commands locally:
 
   ```bash
-  $ fly secrets set FLY_API_TOKEN="$(fly auth token)"
+  $ fly secrets set FLY_API_TOKEN="$(fly tokens create deploy -x 999999h)"
   ```
 
   The following backend options are supported, and mirror the
