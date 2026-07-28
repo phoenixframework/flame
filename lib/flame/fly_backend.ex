@@ -349,7 +349,7 @@ defmodule FLAME.FlyBackend do
       ssl:
         [
           verify: :verify_peer,
-          depth: 2,
+          depth: 5,
           customize_hostname_check: [
             match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
           ]
