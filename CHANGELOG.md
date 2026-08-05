@@ -1,6 +1,9 @@
 # Changelog
 
-## 0.5.3 (2025-12-09)
+## 0.5.4 (2026-08-05)
+
+### Bug Fixes
+- Fix TLS handshake failures caused by letsencrypt depth changes
 
 ### Bug Fixes
 - Include all files in copy paths
