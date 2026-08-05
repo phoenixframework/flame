@@ -497,7 +497,7 @@ defmodule FLAME.Pool do
         {:noreply, replace_caller(state, ref, caller_pid, child_pids)}
 
       reason when reason in [:ok, :timeout, :catch] ->
-        {:noreply, checkin_runner(state, ref, caller_pid, reason)}
+        {:noreply, checkin_runner(state, ref, caller_pid)}
     end
   end
 
@@ -570,21 +570,19 @@ defmodule FLAME.Pool do
     %{state | callers: new_callers}
   end
 
-  defp checkin_runner(state, ref, caller_pid, reason)
+  defp checkin_runner(state, ref, caller_pid)
        when is_reference(ref) and is_pid(caller_pid) do
     case state.callers do
       %{^caller_pid => %Caller{checkout_ref: ^ref} = caller} ->
         Process.demonitor(caller.monitor_ref, [:flush])
         drop_caller(state, caller_pid, caller)
 
-      # the only way to race a checkin is if the caller has expired while still in the
-      # waiting state and checks in on the timeout before we lease it a runner.
-      %{} when reason == :timeout ->
-        maybe_drop_waiting(state, caller_pid)
-
+      # A checkin can race an already-dropped caller. This is benign and must not
+      # crash the pool, which owns the named ETS meta table and whose death would
+      # cascade `lookup_meta/1` and `:noproc` failures to every other caller
+      # as shown in https://github.com/phoenixframework/flame/issues/66.
       %{} ->
-        raise ArgumentError,
-              "expected to checkin runner for #{inspect(caller_pid)} that does not exist"
+        maybe_drop_waiting(state, caller_pid)
     end
   end
 

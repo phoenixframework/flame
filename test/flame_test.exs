@@ -641,4 +641,36 @@ defmodule FLAME.FLAMETest do
     Supervisor.stop(pool_pid)
     refute File.exists?(artifact)
   end
+
+  # Reproduces the runner OOM race from https://github.com/phoenixframework/flame/issues/66.
+  @tag runner: [min: 1, max: 1, max_concurrency: 2]
+  test "runner OOM mid-call does not crash the pool", %{runner_sup: runner_sup} = config do
+    ExUnit.CaptureLog.capture_log(fn ->
+      pool = Process.whereis(config.test)
+      pool_ref = Process.monitor(pool)
+
+      {:ok, caller} = sim_long_running(config.test, 500)
+      Process.unlink(caller)
+      caller_ref = Process.monitor(caller)
+
+      assert [{:undefined, runner, :worker, [FLAME.Runner]}] =
+               Supervisor.which_children(runner_sup)
+
+      # simulate the OOM 100ms into processing
+      Process.sleep(100)
+      Process.exit(runner, :brutal_kill)
+
+      # the pool drops and kills the caller from the runner `:DOWN` first, which
+      # guarantees the caller is no longer tracked once the stray cancel arrives
+      assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}, 1000
+
+      # ...then the caller's in-flight `:catch` cancel lands for the now-unknown caller
+      send(pool, {:cancel, make_ref(), caller, :catch})
+
+      # the pool must stay up (same pid) and keep serving work
+      refute_receive {:DOWN, ^pool_ref, :process, ^pool, _}, 500
+      assert Process.alive?(pool)
+      assert FLAME.call(config.test, fn -> :works end) == :works
+    end)
+  end
 end
