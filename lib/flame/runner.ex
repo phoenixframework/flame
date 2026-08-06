@@ -122,9 +122,11 @@ defmodule FLAME.Runner do
     {ref, %Runner{} = runner, backend_state} = checkout(runner_pid)
     %Runner{terminator: terminator} = runner
     call_timeout = opts[:timeout] || runner.timeout
+    callers = [self() | Process.get(:"$callers", [])]
 
     result =
       remote_call(runner, backend_state, call_timeout, track_resources?, fn ->
+        Process.put(:"$callers", callers)
         if link?, do: Process.link(caller_pid)
         :ok = Terminator.deadline_me(terminator, call_timeout)
         if is_function(func, 1), do: func.(terminator), else: func.()

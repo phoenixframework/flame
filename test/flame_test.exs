@@ -256,6 +256,18 @@ defmodule FLAME.FLAMETest do
     end)
   end
 
+  @tag runner: [min: 1, max: 2, max_concurrency: 2, idle_shutdown_after: 500]
+  test "sets $callers", %{} = config do
+    parent = self()
+    assert FLAME.call(config.test, fn -> Process.get(:"$callers") end) == [parent]
+
+    FLAME.cast(config.test, fn ->
+      send(parent, {:callers, Process.get(:"$callers")})
+    end)
+
+    assert_receive {:callers, [_, ^parent]}
+  end
+
   describe "cast" do
     @tag runner: [min: 1, max: 2, max_concurrency: 2, idle_shutdown_after: 500]
     test "normal execution", %{} = config do
