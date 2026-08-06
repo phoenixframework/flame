@@ -487,6 +487,10 @@ defmodule FLAME.Pool do
     {:noreply, handle_runner_async_up(state, pid, ref)}
   end
 
+  def handle_info({ref, {:error, reason}}, %Pool{} = state) when is_reference(ref) do
+    {:stop, reason, state}
+  end
+
   def handle_info(:async_boot_continue, %Pool{} = state) do
     {:noreply, async_boot_runner(%{state | async_boot_timer: nil})}
   end
@@ -657,7 +661,10 @@ defmodule FLAME.Pool do
           {_runner, new_acc} = put_runner(acc, pid)
           new_acc
 
-        {:exit, reason}, _acc ->
+        {:ok, {:error, reason}}, _acc ->
+          raise "failed to boot runner: #{inspect(reason)}"
+
+        {:ok, {:exit, reason}}, _acc ->
           raise "failed to boot runner: #{inspect(reason)}"
       end)
     else
@@ -695,16 +702,22 @@ defmodule FLAME.Pool do
       restart: :temporary
     }
 
-    {:ok, pid} = DynamicSupervisor.start_child(state.runner_sup, spec)
+    case DynamicSupervisor.start_child(state.runner_sup, spec) do
+      {:ok, pid} ->
+        case Runner.remote_boot(pid, state.base_sync_stream) do
+          :ok ->
+            {:ok, pid}
 
-    try do
-      case Runner.remote_boot(pid, state.base_sync_stream) do
-        :ok -> {:ok, pid}
-        {:error, reason} -> {:error, reason}
-      end
-    catch
-      {:exit, reason} -> {:error, {:exit, reason}}
+          {:error, reason} ->
+            {:error, {:remote_boot_error, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, {:start_error, reason}}
     end
+  catch
+    :exit, reason ->
+      {:error, {:exit, reason}}
   end
 
   defp put_runner(%Pool{} = state, pid) when is_pid(pid) do
