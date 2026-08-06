@@ -189,20 +189,20 @@ defmodule FLAME.Runner do
             end
 
           %{} ->
-            {:noreply, maybe_backend_handle_info(state, msg)}
+            {:noreply, maybe_backend_handle_info(msg, state)}
         end
     end
   end
 
-  def handle_info({_ref, {:remote_shutdown, reason}}, state) do
-    {:stop, {:shutdown, reason}, state}
+  def handle_info({_ref, {:remote_shutdown, reason}} = msg, state) do
+    {:stop, {:shutdown, reason}, maybe_backend_handle_info(msg, state)}
   end
 
   def handle_info(msg, state) do
-    {:noreply, maybe_backend_handle_info(state, msg)}
+    {:noreply, maybe_backend_handle_info(msg, state)}
   end
 
-  defp maybe_backend_handle_info(state, msg) do
+  defp maybe_backend_handle_info(msg, state) do
     %Runner{backend: backend} = state.runner
 
     if function_exported?(backend, :handle_info, 2) do

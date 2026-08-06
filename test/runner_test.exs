@@ -219,6 +219,7 @@ defmodule FLAME.RunnerTest do
     test "with time" do
       timeout = 500
       {:ok, runner} = mock_successful_runner(1, idle_shutdown_after: timeout)
+      expect(MockBackend, :handle_info, fn {_ref, {:remote_shutdown, :idle}}, state -> {:noreply, state} end)
 
       Process.unlink(runner)
       Process.monitor(runner)
@@ -228,6 +229,8 @@ defmodule FLAME.RunnerTest do
       assert_receive {:DOWN, _ref, :process, ^runner, _}
 
       {:ok, runner} = mock_successful_runner(2, idle_shutdown_after: timeout)
+      expect(MockBackend, :handle_info, fn {_ref, {:remote_shutdown, :idle}}, state -> {:noreply, state} end)
+
       Process.unlink(runner)
       Process.monitor(runner)
       assert Runner.remote_boot(runner, nil) == :ok
@@ -241,6 +244,7 @@ defmodule FLAME.RunnerTest do
       timeout = 500
       idle_after = {timeout, fn -> Agent.get(agent, & &1) end}
       {:ok, runner} = mock_successful_runner(1, idle_shutdown_after: idle_after)
+      expect(MockBackend, :handle_info, fn {_ref, {:remote_shutdown, :idle}}, state -> {:noreply, state} end)
 
       Process.unlink(runner)
       Process.monitor(runner)
