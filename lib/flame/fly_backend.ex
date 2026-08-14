@@ -373,10 +373,26 @@ defmodule FLAME.FlyBackend do
         http_post!(url, remaining_tries - 1, opts)
 
       {:ok, {{_, status, reason}, _, resp_body}} ->
-        raise "failed POST #{url} with #{inspect(status)} (#{inspect(reason)}): #{inspect(resp_body)} #{inspect(headers)}"
+        raise "failed POST #{url} with #{inspect(status)} (#{inspect(reason)}): #{inspect(resp_body)} #{inspect(redact(headers))}"
 
       {:error, reason} ->
-        raise "failed POST #{url} with #{inspect(reason)} #{inspect(headers)}"
+        raise "failed POST #{url} with #{inspect(reason)} #{inspect(redact(headers))}"
+    end
+  end
+
+  @redacted_headers ~w(authorization proxy-authorization)
+
+  # The machines API is called with the Fly API token as a bearer credential, and
+  # the errors above are raised into logs and error trackers. Keep the header
+  # names, which are what you want when debugging a failed request, but drop the
+  # values of the ones that carry credentials.
+  defp redact(headers) do
+    for {name, value} <- headers do
+      if String.downcase(to_string(name)) in @redacted_headers do
+        {name, "[REDACTED]"}
+      else
+        {name, value}
+      end
     end
   end
 

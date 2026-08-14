@@ -82,6 +82,22 @@ defmodule FLAME.FlyBackendTest do
     assert Runner.new(backend: FLAME.FlyBackend)
   end
 
+  test "boot failures do not leak the API token" do
+    # Nothing is listening on this port, so the POST fails and remote_boot raises.
+    opts = [token: "super-secret", image: "img", app: "app", host: "http://127.0.0.1:1"]
+    runner = new({FlyBackend, opts})
+    assert {:ok, init} = runner.backend_init
+
+    err =
+      assert_raise RuntimeError, fn ->
+        FlyBackend.remote_boot(%{init | parent_ref: make_ref()})
+      end
+
+    refute err.message =~ "super-secret"
+    assert err.message =~ "Authorization"
+    assert err.message =~ "[REDACTED]"
+  end
+
   test "parent backend attributes" do
     assert %FLAME.Parent{
              pid: _,
